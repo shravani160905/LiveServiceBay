@@ -1,0 +1,26 @@
+[
+  {
+    "id": "EMP-101",
+    "name": "Amit Patel",
+    "role": "Technician",
+    "email": "amit@livebay.com"
+  },
+  {
+    "id": "EMP-102",
+    "name": "Suresh Kumar",
+    "role": "Technician",
+    "email": "suresh@livebay.com"
+  },
+  {
+    "id": "EMP-103",
+    "name": "Manthan Deshmuk",
+    "role": "Technician",
+    "email": "Manth9876@gmail.com"
+  },
+  {
+    "id": "EMP-104",
+    "name": "Soham Jagtap",
+    "role": "Technician",
+    "email": "Jagtab65@gmail.com"
+  }
+]

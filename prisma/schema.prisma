@@ -1,0 +1,54 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 👥 1. USER / STAFF WORKFORCE TABLE
+model User {
+  id        String   @id @default(uuid()) // Secure unique identifier
+  name      String
+  email     String   @unique
+  role      String   // "Service Advisor" | "Technician"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  jobs      Job[]    // Relational link: One technician can handle multiple job cards
+}
+
+// 🏗️ 2. WORKSHOP BAY INFRASTRUCTURE TABLE
+model Bay {
+  id        String   @id @default(uuid())
+  name      String   @unique // e.g., "Bay 1", "Bay 2"
+  createdAt DateTime @default(now())
+  jobs      Job[]    // Relational link: One physical bay hosts multiple jobs over time
+}
+
+// 🚗 3. CENTRAL VEHICLE JOB CARDS TABLE
+model Job {
+  id              String    @id 
+  vehicleNumber   String    
+  brandModel      String
+  manufactureYear String
+  customerName    String
+  phoneNumber     String
+  customerEmail   String
+  status          String    @default("Awaiting Inspection")
+  color           String    @default("#94a3b8")
+  
+  // 🎯 FLAT STRING FIELDS TO LOCK VALUES IMMEDIATELY
+  assignedBay     String    @default("Unassigned")
+  assignedTech    String    @default("Unassigned")
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  completedAt     DateTime? 
+
+  // Keep these at the bottom untouched for Phase 2/3 relations
+  technicianId    String?
+  technician      User?     @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+  bayId           String?
+  bay             Bay?      @relation(fields: [bayId], references: [id], onDelete: SetNull)
+}

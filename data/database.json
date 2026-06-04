@@ -1,0 +1,72 @@
+[
+  {
+    "id": "JOB-102",
+    "vehicleNumber": "MH02XY9876",
+    "brandModel": "Maruti Swift",
+    "customerName": "Priya Nair",
+    "phoneNumber": "9822334455",
+    "technician": "Manthan Deshmuk",
+    "bay": "Bay 3",
+    "status": "In Progress",
+    "color": "#eab308",
+    "completedAt": null,
+    "updatedAt": "2026-06-02T04:53:26.801Z"
+  },
+  {
+    "id": "JOB-103",
+    "vehicleNumber": "MH04 KW 2728",
+    "brandModel": "Volkswagen Taigun",
+    "customerName": "Shravani Salaskar",
+    "phoneNumber": "7045710005",
+    "technician": "Amit Patel",
+    "bay": "Bay 3",
+    "status": "In Progress",
+    "color": "#eab308",
+    "customerEmail": "shrausalaskar0516@gmail.com",
+    "manufactureYear": "2021",
+    "updatedAt": "2026-06-01T05:35:19.863Z",
+    "completedAt": null
+  },
+  {
+    "id": "JOB-104",
+    "vehicleNumber": "MH04 MJ 4001",
+    "brandModel": "Volkswagen Polo",
+    "customerName": "Ankita Kurade",
+    "phoneNumber": "7045710005",
+    "technician": "Soham Jagtap",
+    "bay": "Bay 2",
+    "status": "In Progress",
+    "color": "#eab308",
+    "createdAt": "2026-05-29T05:57:06.586Z",
+    "completedAt": null,
+    "updatedAt": "2026-06-01T05:36:54.036Z"
+  },
+  {
+    "id": "JOB-105",
+    "vehicleNumber": "MH04 HZ 3475",
+    "brandModel": "Maruti Tigor",
+    "manufactureYear": "2024",
+    "customerName": "Sandhya Chaya",
+    "phoneNumber": "7980122343",
+    "customerEmail": "Shandyachaya121@gmail.com",
+    "technician": "Unassigned",
+    "bay": "Unassigned",
+    "status": "Awaiting Inspection",
+    "color": "#94a3b8",
+    "createdAt": "2026-06-01T05:08:29.557Z"
+  },
+  {
+    "id": "JOB-106",
+    "vehicleNumber": "MH04 AB 3536",
+    "brandModel": "Swift Dzire",
+    "manufactureYear": "2018",
+    "customerName": "Shreyash Boxingwalla",
+    "phoneNumber": "9820495672",
+    "customerEmail": "Boxing@gmail.com",
+    "technician": "Unassigned",
+    "bay": "Unassigned",
+    "status": "Awaiting Inspection",
+    "color": "#94a3b8",
+    "createdAt": "2026-06-01T11:47:36.095Z"
+  }
+]
