@@ -47,6 +47,58 @@ export default function DashboardPage() {
     yearOptions.push(y.toString());
   }
 
+  // 🎨 ENTERPRISE STATUS BADGE COLOR SCHEME GENERATOR
+  const getStatusBadgeStyle = (status: string) => {
+    const normalizeStatus = status?.toUpperCase() || "";
+
+    const baseStyles = {
+      padding: "6px 12px",
+      borderRadius: "6px",
+      fontSize: "13px", 
+      fontWeight: "800",
+      display: "inline-block",
+      textAlign: "center" as const,
+      letterSpacing: "0.5px",
+      border: "1px solid",
+      textTransform: "uppercase" as const
+    };
+
+    if (normalizeStatus === "COMPLETED" || normalizeStatus === "DONE") {
+      return {
+        ...baseStyles,
+        backgroundColor: "#f0fdf4", // Soft emerald tint
+        color: "#16a34a",           // Deep green text
+        borderColor: "#bbf7d0"      // Matching border
+      };
+    }
+    
+    if (normalizeStatus === "IN PROGRESS") {
+      return {
+        ...baseStyles,
+        backgroundColor: "#eff6ff", // Soft corporate blue tint
+        color: "#2563eb",           // Saturated blue text
+        borderColor: "#bfdbfe"      // Matching border
+      };
+    }
+
+    if (normalizeStatus === "PENDING" || normalizeStatus === "INTAKE" || normalizeStatus === "PENDING ALLOCATION") {
+      return {
+        ...baseStyles,
+        backgroundColor: "#fffbeb", // Soft amber tint
+        color: "#d97706",           // Saturated orange/amber text
+        borderColor: "#fde68a"      // Matching border
+      };
+    }
+
+    // Default Fallback / UNASSIGNED status appearance
+    return {
+      ...baseStyles,
+      backgroundColor: "#f8fafc",   // Slate tint
+      color: "#64748b",             // Charcoal gray text
+      borderColor: "#cbd5e1"        // Matching border
+    };
+  };
+
   const refreshAllData = async () => {
     try {
       setLoading(true);
@@ -340,11 +392,33 @@ export default function DashboardPage() {
     const isActive = activeTab === tabName;
     const isHovered = hoveredTab === tabName;
     return {
-      padding: "12px 14px", borderRadius: "8px", fontWeight: "700", fontSize: "14px", cursor: "pointer",
-      display: "flex", alignItems: "center", gap: "10px", transition: "all 0.15s ease",
-      backgroundColor: isActive ? "#1e293b" : isHovered ? "rgba(51, 65, 85, 0.4)" : "transparent",
-      color: isActive ? "#38bdf8" : isHovered ? "#f1f5f9" : "#94a3b8"
+      padding: "12px 14px 12px 12px", 
+      borderRadius: "8px", 
+      fontWeight: "700", 
+      fontSize: "14px", 
+      cursor: "pointer",
+      display: "flex", 
+      alignItems: "center", 
+      gap: "10px", 
+      transition: "all 0.15s ease",
+      position: "relative" as const,
+      backgroundColor: isActive ? "#1e293b" : isHovered ? "rgba(51, 65, 85, 0.3)" : "transparent",
+      color: isActive ? "#ffffff" : isHovered ? "#f1f5f9" : "#94a3b8",
+      borderLeft: isActive ? "4px solid #2563eb" : "4px solid transparent", 
+      paddingLeft: isActive ? "10px" : "12px" 
     };
+  };
+
+  // 💡 Premium CSS Variable style configs for sleek responsive input frames
+  const inputStyle = {
+    width: "100%",
+    padding: "14px", 
+    borderRadius: "8px",
+    border: "1px solid #cbd5e1",
+    fontSize: "15.5px", 
+    outline: "none",
+    boxSizing: "border-box" as const,
+    transition: "border-color 0.2s, box-shadow 0.2s"
   };
 
   return (
@@ -363,9 +437,9 @@ export default function DashboardPage() {
             { name: "Vehicle Check-In", icon: "🚗" },
             { name: "Job Cards", icon: "📝" },
             { name: "Bay & Tech Assignment", icon: "🔧" },
-            { name: "Camera Mapping", icon: "📹" },
-            { name: "Service Session", icon: "⏱️" },
-            { name: "Report", icon: "📈" },
+            { name: "Camera Mapping (Future)", icon: "📹" },
+            { name: "Service Session (optional)", icon: "⏱️" },
+            { name: "Report (Optional)", icon: "📈" },
             { name: "Settings", icon: "⚙️" }
           ].map((tab) => (
             <div key={tab.name} onClick={() => setActiveTab(tab.name)} onMouseEnter={() => setHoveredTab(tab.name)} onMouseLeave={() => setHoveredTab(null)} style={getTabStyle(tab.name)}>
@@ -388,7 +462,7 @@ export default function DashboardPage() {
         
         <div>
           <h1 style={{ fontSize: "28px", fontWeight: "900", color: "#0f172a", margin: "0 0 4px 0" }}>{activeTab}</h1>
-          <p style={{ margin: 0, color: "#64748b", fontSize: "14px", fontWeight: "600" }}>Industrial-Grade Enterprise Fleet Logging</p>
+          <p style={{ margin: 0, color: "#64748b", fontSize: "14px", fontWeight: "600" }}>Service Operations Overview</p>
         </div>
 
         {loading ? (
@@ -398,19 +472,49 @@ export default function DashboardPage() {
             {/* MODULE: ACTIVE WORKSPACE */}
             {activeTab === "Active Workspace" && (
               <>
+                {/* 📊 UPGRADED ENTERPRISE KPI METRIC CARDS */}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "24px", width: "100%" }}>
-                  <div style={{ backgroundColor: "#fff", padding: "24px", borderRadius: "16px", border: "1px solid #e2e8f0" }}>
-                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#64748b" }}>ACTIVE REPAIRS</div>
-                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#0f172a", marginTop: "8px" }}>{jobs.filter(j => j.status !== "Completed").length}</div>
+                  
+                  {/* 📊 METRICS CARDS WITH REFINED SPACING AND VISUAL ANCHORS */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "24px", width: "100%" }}>
+                  
+                  {/* ACTIVE REPAIRS CARD */}
+                  <div style={{ backgroundColor: "#ffffff", padding: "24px 28px", borderRadius: "16px", border: "1px solid #e2e8f0", borderLeft: "6px solid #2563eb", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontSize: "12px", fontWeight: "800", color: "#64748b", letterSpacing: "0.5px" }}>ACTIVE REPAIRS</div>
+                      <div style={{ fontSize: "38px", fontWeight: "900", color: "#0f172a", marginTop: "12px", lineHeight: "1" }}>
+                        {jobs.filter(j => j.status !== "Completed").length}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", marginTop: "6px" }}>In workshop bays</div>
+                    </div>
+                    <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", selectUser: "none", pointerEvents: "none" }}>🔧</div>
                   </div>
-                  <div style={{ backgroundColor: "#fff", padding: "24px", borderRadius: "16px", border: "1px solid #e2e8f0" }}>
-                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#64748b" }}>UNASSIGNED ASSETS</div>
-                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#2563eb", marginTop: "8px" }}>{jobs.filter(j => j.status !== "Completed" && (j.bay === "Unassigned" || j.bay === "" || j.technician === "Unassigned" || j.technician === "")).length}</div>
+
+                  {/* UNASSIGNED VEHICLES CARD */}
+                  <div style={{ backgroundColor: "#ffffff", padding: "24px 28px", borderRadius: "16px", border: "1px solid #e2e8f0", borderLeft: "6px solid #d97706", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontSize: "12px", fontWeight: "800", color: "#64748b", letterSpacing: "0.5px" }}>UNASSIGNED VEHICLES</div>
+                      <div style={{ fontSize: "38px", fontWeight: "900", color: "#d97706", marginTop: "12px", lineHeight: "1" }}>
+                        {jobs.filter(j => j.status !== "Completed" && (j.bay === "Unassigned" || j.bay === "" || j.technician === "Unassigned" || j.technician === "")).length}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", marginTop: "6px" }}>Awaiting allocation</div>
+                    </div>
+                    <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", selectUser: "none", pointerEvents: "none" }}>⚠️</div>
                   </div>
-                  <div style={{ backgroundColor: "#fff", padding: "24px", borderRadius: "16px", border: "1px solid #e2e8f0" }}>
-                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#64748b" }}>COMPLETED UNITS</div>
-                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#16a34a", marginTop: "8px" }}>{jobs.filter(j => j.status === "Completed").length}</div>
+
+                  {/* COMPLETED VEHICLES CARD */}
+                  <div style={{ backgroundColor: "#ffffff", padding: "24px 28px", borderRadius: "16px", border: "1px solid #e2e8f0", borderLeft: "6px solid #16a34a", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontSize: "12px", fontWeight: "800", color: "#64748b", letterSpacing: "0.5px" }}>COMPLETED VEHICLES</div>
+                      <div style={{ fontSize: "38px", fontWeight: "900", color: "#16a34a", marginTop: "12px", lineHeight: "1" }}>
+                        {jobs.filter(j => j.status === "Completed").length}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", marginTop: "6px" }}>Ready for handover</div>
+                    </div>
+                    <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", selectUser: "none", pointerEvents: "none" }}>✅</div>
                   </div>
+
+                </div>
                 </div>
 
                 <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
@@ -428,21 +532,40 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {jobs.map((job) => (
-                        <tr key={job.id} style={{ borderBottom: "1px solid #edf2f7", fontSize: "14px", color: "#334155", fontWeight: "600" }}>
-                          <td style={{ padding: "16px 8px", color: "#2563eb", fontWeight: "800" }}>{job.id}</td>
-                          <td style={{ padding: "16px 8px", textTransform: "uppercase" }}>{job.vehicleNumber}</td>
-                          <td style={{ padding: "16px 8px" }}>{job.brandModel} <span style={{fontSize:"11px", color:"#94a3b8"}}>({job.manufactureYear})</span></td>
-                          <td style={{ padding: "16px 8px" }}>{job.customerName}</td>
-                          <td style={{ padding: "16px 8px" }}>{job.phoneNumber}</td>
-                          <td style={{ padding: "16px 8px" }}>{job.bay}</td>
-                          <td style={{ padding: "16px 8px" }}>
-                            <span style={{ backgroundColor: job.color, color: "#fff", padding: "6px 12px", borderRadius: "20px", fontSize: "11px", fontWeight: "900", textTransform: "uppercase" }}>
-                              {job.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {jobs.map((job, index) => {
+                        const isEvenRow = index % 2 === 0;
+                        const rowBgColor = isEvenRow ? "#ffffff" : "#f8fafc";
+                        
+                        return (
+                          <tr 
+                            key={job.id} 
+                            style={{ 
+                              borderBottom: "1px solid #edf2f7", 
+                              fontSize: "14px", 
+                              color: "#334155", 
+                              fontWeight: "600",
+                              backgroundColor: rowBgColor,
+                              transition: "background-color 0.15s ease"
+                            }}
+                          >
+                            <td style={{ padding: "18px 12px", color: "#2563eb", fontWeight: "800" }}>{job.id}</td>
+                            <td style={{ padding: "18px 12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>{job.vehicleNumber}</td>
+                            <td style={{ padding: "18px 12px", color: "#0f172a", fontWeight: "700" }}>
+                              {job.brandModel} <span style={{fontSize:"11px", color: "#64748b", fontWeight: "500"}}>({job.manufactureYear})</span>
+                            </td>
+                            <td style={{ padding: "18px 12px" }}>{job.customerName}</td>
+                            <td style={{ padding: "18px 12px", color: "#64748b" }}>{job.phoneNumber}</td>
+                            <td style={{ padding: "18px 12px", fontWeight: "700" }}>
+                              {job.bay === "Unassigned" || !job.bay ? "⚠️ Unassigned" : job.bay}
+                            </td>
+                            <td style={{ padding: "18px 12px" }}>
+                              <span style={getStatusBadgeStyle(job.status)}>
+                                {job.status || "UNASSIGNED"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -456,85 +579,85 @@ export default function DashboardPage() {
                 {/* LEFT COLUMN: REGISTRATION INPUT FORM DECK */}
                 <form onSubmit={handleVehicleSubmit} style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
                   {formError && (
-                    <div style={{ backgroundColor: "#fef2f2", color: "#b91c1c", padding: "16px", borderRadius: "10px", border: "1px solid #fca5a5", fontSize: "14px", fontWeight: "700" }}>
+                    <div style={{ backgroundColor: "#fef2f2", color: "#b91c1c", padding: "16px", borderRadius: "10px", border: "1px solid #fca5a5", fontSize: "15px", fontWeight: "700" }}>
                       ⚠️ Validation Error: {formError}
                     </div>
                   )}
                   
-                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px" }}>
-                    <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
-                      {editingJobId ? `✏️ Edit Operations Record (${editingJobId})` : "🚗 Intake Fleet Check-In"}
+                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                    <h3 style={{ margin: "0 0 6px 0", fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>
+                      {editingJobId ? `✏️ Edit Job Record (${editingJobId})` : "🚗 New Vehicle Intake"}
                     </h3>
-                    <p style={{ margin: "0 0 20px 0", color: "#64748b", fontSize: "12px", fontWeight: "600" }}>Log operational diagnostic fields securely.</p>
+                    <p style={{ margin: "0 0 20px 0", color: "#64748b", fontSize: "13.5px", fontWeight: "600" }}>Register incoming vehicle and owner details.</p>
                     
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                       <div>
-                        <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>Customer Owner Name *</label>
-                        <input type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Full Name" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize:"14px" }} required />
+                        <label style={{ display: "block", fontSize: "14.5px", fontWeight: "700", marginBottom: "8px", color: "#334155" }}>Customer Name *</label>
+                        <input type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="First & Last Name" style={inputStyle} required />
                       </div>
                       
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                         <div>
-                          <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>Phone Contact *</label>
-                          <input type="text" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="Primary Mobile" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize:"14px" }} required />
+                          <label style={{ display: "block", fontSize: "14.5px", fontWeight: "700", marginBottom: "8px", color: "#334155" }}>Phone Number *</label>
+                          <input type="text" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="Primary Mobile" style={inputStyle} required />
                         </div>
                         <div>
-                          <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>Email Access ID *</label>
-                          <input type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="name@domain.com" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize:"14px" }} required />
+                          <label style={{ display: "block", fontSize: "14.5px", fontWeight: "700", marginBottom: "8px", color: "#334155" }}>Customer Email *</label>
+                          <input type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="name@domain.com" style={inputStyle} required />
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px" }}>
-                    <h3 style={{ margin: "0 0 20px 0", fontSize: "16px", fontWeight: "800" }}>Vehicle Identification Parameters</h3>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                    <h3 style={{ margin: "0 0 20px 0", fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>Vehicle Details</h3>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                       
                       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "16px" }}>
                         <div>
-                          <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>License Number Plate *</label>
-                          <input type="text" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. MH04KW2728" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", textTransform: "uppercase", fontSize:"14px", fontWeight:"700" }} required />
+                          <label style={{ display: "block", fontSize: "14.5px", fontWeight: "700", marginBottom: "8px", color: "#334155" }}>Vehicle Registration Number *</label>
+                          <input type="text" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. MH04KW2728" style={{ ...inputStyle, textTransform: "uppercase", fontWeight:"700" }} required />
                         </div>
                         <div>
-                          <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>Model Release Year *</label>
-                          <select value={manufactureYear} onChange={(e) => setManufactureYear(e.target.value)} style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor:"#fff", fontSize:"14px", fontWeight:"700" }}>
+                          <label style={{ display: "block", fontSize: "14.5px", fontWeight: "700", marginBottom: "8px", color: "#334155" }}>Model Release Year *</label>
+                          <select value={manufactureYear} onChange={(e) => setManufactureYear(e.target.value)} style={{ ...inputStyle, backgroundColor:"#fff", fontWeight:"700" }}>
                             {yearOptions.map(yr => <option key={yr} value={yr}>{yr}</option>)}
                           </select>
                         </div>
                       </div>
 
                       <div>
-                        <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>Brand & Specific Model Designation *</label>
-                        <input type="text" value={brandModel} onChange={(e) => setBrandModel(e.target.value)} placeholder="e.g. Volkswagen Taigun GT" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize:"14px" }} required />
+                        <label style={{ display: "block", fontSize: "14.5px", fontWeight: "700", marginBottom: "8px", color: "#334155" }}>Vehicle Make & Model *</label>
+                        <input type="text" value={brandModel} onChange={(e) => setBrandModel(e.target.value)} placeholder="e.g. Volkswagen Taigun GT" style={inputStyle} required />
                       </div>
                     </div>
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
                     {editingJobId && (
-                      <button type="button" onClick={handleCancelJobEdit} style={{ padding: "12px 24px", backgroundColor: "#f1f5f9", color: "#334155", border: "1px solid #cbd5e1", borderRadius: "8px", fontWeight: "800", cursor: "pointer" }}>Cancel</button>
+                      <button type="button" onClick={handleCancelJobEdit} style={{ padding: "12px 24px", backgroundColor: "#f1f5f9", color: "#334155", border: "1px solid #cbd5e1", borderRadius: "8px", fontWeight: "800", fontSize: "14px", cursor: "pointer" }}>Cancel</button>
                     )}
-                    <button type="submit" style={{ padding: "12px 32px", backgroundColor: editingJobId ? "#16a34a" : "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", cursor: "pointer" }}>
-                      {editingJobId ? "💾 Save Changes" : "Commit Intake"}
+                    <button type="submit" style={{ padding: "14px 36px", backgroundColor: editingJobId ? "#16a34a" : "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", fontSize: "15.5px", cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
+                      {editingJobId ? "💾 Save Changes" : "Register Vehicle"}
                     </button>
                   </div>
                 </form>
 
                 {/* RIGHT COLUMN: ACTIVE INDEX TERMINAL WITH LIVE FILTER CONTROLS */}
-                <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", height: "680px", display: "flex", flexDirection: "column" }}>
-                  <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800", color:"#0f172a" }}>Active Floor Inventory Index</h3>
-                  <p style={{ margin: "0 0 16px 0", color: "#64748b", fontSize: "12px", fontWeight: "600" }}>Filter and select vehicle configs to modify field parameters.</p>
+                <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", height: "680px", display: "flex", flexDirection: "column", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                  <h3 style={{ margin: "0 0 4px 0", fontSize: "18px", fontWeight: "800", color:"#0f172a" }}>Active Vehicle Directory</h3>
+                  <p style={{ margin: "0 0 16px 0", color: "#64748b", fontSize: "13.5px", fontWeight: "600" }}>Select a vehicle from the directory to modify details or remove entry.</p>
                   
                   {/* SEARCH AND TIMELINE FILTERS CONTAINER */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
                     <div style={{ position: "relative" }}>
-                      <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="🔍 Search by vehicle number plate..." style={{ width: "100%", padding: "12px 14px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "600", boxSizing: "border-box" }} />
+                      <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="🔍 Search by vehicle number..." style={{ width: "100%", padding: "13px 14px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", fontWeight: "600", boxSizing: "border-box" }} />
                     </div>
 
                     <div style={{ display: "flex", backgroundColor: "#f1f5f9", padding: "4px", borderRadius: "8px", gap: "4px" }}>
                       {["All", "Today", "Yesterday"].map((tab) => (
-                        <button key={tab} type="button" onClick={() => setDateFilter(tab)} style={{ flexGrow: 1, padding: "8px 12px", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: "800", cursor: "pointer", transition: "all 0.1s", backgroundColor: dateFilter === tab ? "#ffffff" : "transparent", color: dateFilter === tab ? "#2563eb" : "#64748b", boxShadow: dateFilter === tab ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>
-                          {tab === "All" ? "🌐 Show All" : tab === "Today" ? "📅 Today" : "⏳ Yesterday"}
+                        <button key={tab} type="button" onClick={() => setDateFilter(tab)} style={{ flexGrow: 1, padding: "10px 12px", border: "none", borderRadius: "6px", fontSize: "13px", fontWeight: "800", cursor: "pointer", transition: "all 0.1s", backgroundColor: dateFilter === tab ? "#ffffff" : "transparent", color: dateFilter === tab ? "#2563eb" : "#64748b", boxShadow: dateFilter === tab ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>
+                          {tab === "All" ? "📄 All Records" : tab === "Today" ? "📅 Today" : "⏳ Yesterday"}
                         </button>
                       ))}
                     </div>
@@ -543,24 +666,24 @@ export default function DashboardPage() {
                   {/* COMPUTED SCROLLABLE ROWS */}
                   <div style={{ flexGrow: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
                     {getFilteredJobs().length === 0 ? (
-                      <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8", fontSize: "13px", fontWeight: "700" }}>📭 No matching vehicle records found.</div>
+                      <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8", fontSize: "14px", fontWeight: "700" }}>📭 No matching vehicle records found.</div>
                     ) : (
                       getFilteredJobs().map((job) => {
                         const isBeingEdited = editingJobId === job.id;
                         return (
-                          <div key={job.id} style={{ padding: "16px", border: "1px solid #e2e8f0", borderRadius: "12px", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: isBeingEdited ? "#eff6ff" : "#ffffff", borderColor: isBeingEdited ? "#38bdf8" : "#e2e8f0", transition: "all 0.2s" }}>
+                          <div key={job.id} style={{ padding: "18px", border: "1px solid #e2e8f0", borderRadius: "12px", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: isBeingEdited ? "#eff6ff" : "#ffffff", borderColor: isBeingEdited ? "#38bdf8" : "#e2e8f0", transition: "all 0.2s" }}>
                             <div>
-                              <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>{job.brandModel} <span style={{fontSize:"11px", color:"#64748b"}}>({job.manufactureYear || "N/A"})</span></div>
-                              <div style={{ fontSize: "13px", fontWeight: "700", color: "#2563eb", textTransform: "uppercase", marginTop:"2px" }}>{job.vehicleNumber}</div>
-                              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "6px" }}>Owner: {job.customerName} • {job.phoneNumber}</div>
+                              <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>{job.brandModel} <span style={{fontSize:"12px", color: "#64748b"}}>({job.manufactureYear || "N/A"})</span></div>
+                              <div style={{ fontSize: "14px", fontWeight: "700", color: "#2563eb", textTransform: "uppercase", marginTop:"2px" }}>{job.vehicleNumber}</div>
+                              <div style={{ fontSize: "12.5px", color: "#64748b", marginTop: "6px" }}>Owner: {job.customerName} • {job.phoneNumber}</div>
                             </div>
                             
-                            {/* 🔥 CLEAN SIDE-BY-SIDE BUTTON DESIGN FIXED IN POSITION */}
+                            {/* 🔥 CLEAN SIDE-BY-SIDE BUTTON DESIGN */}
                             <div style={{ display: "flex", gap: "6px" }}>
-                              <button type="button" onClick={() => handleStartEditJob(job)} disabled={isBeingEdited} style={{ padding: "8px 14px", backgroundColor: isBeingEdited ? "#cbd5e1" : "#0f172a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "12px", cursor: isBeingEdited ? "not-allowed" : "pointer" }}>
-                                {isBeingEdited ? "⚡ Targeting" : "✏️ Modify"}
+                              <button type="button" onClick={() => handleStartEditJob(job)} disabled={isBeingEdited} style={{ padding: "9px 15px", backgroundColor: isBeingEdited ? "#cbd5e1" : "#0f172a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "13px", cursor: isBeingEdited ? "not-allowed" : "pointer" }}>
+                                {isBeingEdited ? "⚡ Editing" : "✏️ Modify"}
                               </button>
-                              <button type="button" onClick={() => handleDeleteJob(job.id, job.vehicleNumber)} style={{ padding: "8px 10px", backgroundColor: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.15)", borderRadius: "6px", color: "#ef4444", fontWeight: "800", fontSize: "12px", cursor: "pointer" }}>
+                              <button type="button" onClick={() => handleDeleteJob(job.id, job.vehicleNumber)} style={{ padding: "9px 11px", backgroundColor: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.15)", borderRadius: "6px", color: "#ef4444", fontWeight: "800", fontSize: "13px", cursor: "pointer" }}>
                                 🗑️
                               </button>
                             </div>
@@ -577,8 +700,8 @@ export default function DashboardPage() {
 
             {/* MODULE: JOB CARDS */}
             {activeTab === "Job Cards" && (
-              <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px" }}>
-                <h3 style={{ margin: "0 0 20px 0", fontSize: "18px", fontWeight: "800" }}>Active Service Control Records</h3>
+              <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
+                <h3 style={{ margin: "0 0 20px 0", fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>Active Service Control Records</h3>
                 <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
                   <thead>
                     <tr style={{ borderBottom: "2px solid #edf2f7", color: "#64748b", fontSize: "13px", fontWeight: "800" }}>
@@ -597,42 +720,9 @@ export default function DashboardPage() {
                         <td style={{ padding: "16px 8px" }}>{job.brandModel}</td>
                         <td style={{ padding: "16px 8px" }}>{job.customerName}</td>
                         <td style={{ padding: "16px 8px", fontWeight: "700" }}>
-                          {job.status === "Completed" ? (
-                            <span style={{ 
-                              backgroundColor: "#f0fdf4", 
-                              color: "#16a34a", 
-                              padding: "6px 12px", 
-                              borderRadius: "6px", 
-                              fontSize: "12px",
-                              border: "1px solid #bbf7d0",
-                              display: "inline-flex",
-                              alignItems: "center"
-                            }}>
-                              ✅ Done
-                            </span>
-                          ) : job.status === "In Progress" ? (
-                            <span style={{ 
-                              backgroundColor: "#eff6ff", 
-                              color: "#2563eb", 
-                              padding: "6px 12px", 
-                              borderRadius: "6px", 
-                              fontSize: "12px",
-                              border: "1px solid #bfdbfe"
-                            }}>
-                              ⚡ IN PROGRESS
-                            </span>
-                          ) : (
-                            <span style={{ 
-                              backgroundColor: "#fffbeb", 
-                              color: "#d97706", 
-                              padding: "6px 12px", 
-                              borderRadius: "6px", 
-                              fontSize: "12px",
-                              border: "1px solid #fde68a"
-                            }}>
-                              ⚠️ PENDING ALLOCATION
-                            </span>
-                          )}
+                          <span style={getStatusBadgeStyle(job.status)}>
+                            {job.status === "Completed" ? "✅ Done" : job.status}
+                          </span>
                         </td>
                       </tr>
                     ))}
@@ -643,15 +733,15 @@ export default function DashboardPage() {
 
             {/* MODULE: BAY & TECH ASSIGNMENT */}
             {activeTab === "Bay & Tech Assignment" && (
-              <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px" }}>
-                <h3 style={{ margin: "0 0 8px 0", fontSize: "18px", fontWeight: "800" }}>Floor Marshalling Allocation Matrix</h3>
+              <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
+                <h3 style={{ margin: "0 0 8px 0", fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>Bay Assignment Manager</h3>
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                   {jobs.map((job) => {
                     const isEditing = !!editingRows[job.id];
                     return (
                       <div key={job.id} style={{ padding: "20px", border: "1px solid #e2e8f0", borderRadius: "12px", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", backgroundColor: isEditing ? "#f8fafc" : "#ffffff", gap: "16px" }}>
                         <div>
-                          <div style={{ fontSize: "15px", fontWeight: "800" }}>{job.brandModel} (<span style={{ textTransform: "uppercase" }}>{job.vehicleNumber}</span>)</div>
+                          <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>{job.brandModel} (<span style={{ textTransform: "uppercase" }}>{job.vehicleNumber}</span>)</div>
                           <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>ID: {job.id} • Owner: {job.customerName}</div>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -670,23 +760,13 @@ export default function DashboardPage() {
                             ))}
                           </select>
 
-                          {/* 🔥 DYNAMIC ACTIONS / DONE BADGE CONTROLLER */}
                           {job.status === "Completed" ? (
-                            <span style={{ 
-                              padding: "10px 18px", 
-                              backgroundColor: "#f0fdf4", 
-                              color: "#16a34a", 
-                              border: "1px solid #bbf7d0", 
-                              borderRadius: "8px", 
-                              fontWeight: "800", 
-                              fontSize: "13px",
-                              display: "inline-flex",
-                              alignItems: "center"
-                            }}>
+                            <span style={getStatusBadgeStyle("Completed")}>
                               ✅ Done
                             </span>
                           ) : !editingRows[job.id] ? (
                             <div style={{ display: "flex", gap: "8px" }}>
+                              {/* 🎯 FIXED: Functional wrapper arrow added cleanly inside onClick */}
                               <button type="button" onClick={() => setEditingRows({ ...editingRows, [job.id]: true })} style={{ padding: "10px 18px", backgroundColor: "#0f172a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", fontSize: "13px", cursor: "pointer" }}>
                                 ✏️ Edit
                               </button>
@@ -717,18 +797,18 @@ export default function DashboardPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: "24px", alignItems: "start" }}>
                   
                   {/* WORKFORCE PANEL REGISTER */}
-                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px" }}>
-                    <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800" }}>
+                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                    <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
                       {editingEmpId ? "✏️ Modify Operator Records" : "➕ Onboard Corporate Staff"}
                     </h3>
                     <p style={{ margin: "0 0 20px 0", color: "#64748b", fontSize: "12px", fontWeight: "600" }}>Register service advisors and mechanical technical staff fields.</p>
                     <form onSubmit={handleSaveStaffProfile} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
-                        <input type="text" value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="Full Name" style={{ padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px" }} required />
-                        <input type="email" value={empEmail} onChange={(e) => setEmpEmail(e.target.value)} placeholder="Email Address" style={{ padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px" }} required />
+                        <input type="text" value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="Full Name" style={inputStyle} required />
+                        <input type="email" value={empEmail} onChange={(e) => setEmpEmail(e.target.value)} placeholder="Email Address" style={inputStyle} required />
                       </div>
                       <div style={{ display: "flex", gap: "12px" }}>
-                        <select value={empRole} onChange={(e) => setEmpRole(e.target.value)} style={{ padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", fontWeight: "700", flexGrow: 1, backgroundColor: "#fff" }}>
+                        <select value={empRole} onChange={(e) => setEmpRole(e.target.value)} style={{ ...inputStyle, fontWeight: "700", flexGrow: 1, backgroundColor: "#fff" }}>
                           <option value="Service Advisor">Service Advisor</option>
                           <option value="Technician">Technician</option>
                         </select>
@@ -740,11 +820,11 @@ export default function DashboardPage() {
                   </div>
 
                   {/* REPAIR BAY INFRASTRUCTURE PANEL */}
-                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px" }}>
-                    <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800" }}>🏗️ Expand Station Bays</h3>
+                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                    <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>🏗️ Expand Station Bays</h3>
                     <p style={{ margin: "0 0 20px 0", color: "#64748b", fontSize: "12px", fontWeight: "600" }}>Provision physical repair bay arrays dynamically.</p>
                     <form onSubmit={handleRegisterNewBay} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                      <input type="text" value={newBayName} onChange={(e) => setNewBayName(e.target.value)} placeholder="e.g. Bay 5" style={{ padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px" }} required />
+                      <input type="text" value={newBayName} onChange={(e) => setNewBayName(e.target.value)} placeholder="e.g. Bay 5" style={inputStyle} required />
                       <button type="submit" style={{ padding: "12px", backgroundColor: "#0f172a", color: "#fff", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: "800", cursor: "pointer" }}>
                         Provision New Station
                       </button>
@@ -756,8 +836,8 @@ export default function DashboardPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: "24px", alignItems: "start" }}>
                   
                   {/* STAFF RECORDS REGISTRY */}
-                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px" }}>
-                    <h3 style={{ margin: "0 0 16px 0", fontSize: "15px", fontWeight: "800" }}>Active Center Staff Index</h3>
+                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                    <h3 style={{ margin: "0 0 16px 0", fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Active Center Staff Index</h3>
                     <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
                       <thead>
                         <tr style={{ borderBottom: "2px solid #edf2f7", color: "#64748b", fontSize: "12px", fontWeight: "800" }}>
@@ -790,8 +870,8 @@ export default function DashboardPage() {
                   </div>
 
                   {/* STATION LAYOUT REGISTRY */}
-                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px" }}>
-                    <h3 style={{ margin: "0 0 16px 0", fontSize: "15px", fontWeight: "800" }}>Service Bay Infrastructure Node</h3>
+                  <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                    <h3 style={{ margin: "0 0 16px 0", fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Service Bay Infrastructure Node</h3>
                     <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
                       <thead>
                         <tr style={{ borderBottom: "2px solid #edf2f7", color: "#64748b", fontSize: "12px", fontWeight: "800" }}>
@@ -821,10 +901,10 @@ export default function DashboardPage() {
 
             {/* FALLBACK CONTROL BACKDROP */}
             {["Camera Mapping", "Service Session", "Report"].includes(activeTab) && (
-              <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "60px", textAlign: "center" }}>
+              <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "60px", textAlign: "center", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
                 <div style={{ fontSize: "48px", marginBottom: "16px" }}>📡</div>
                 <h3 style={{ margin: "0 0 8px 0", fontSize: "20px", fontWeight: "800", color: "#0f172a" }}>{activeTab} Management View</h3>
-                <p style={{ color: "#64748b", fontWeight: "600", margin: 0 }}>Connected to full-stack API schema layer.</p>
+                <p style={{ color: "#64748b", fontWeight: "600", margin: 0 }}>View and manage active service sessions.</p>
               </div>
             )}
           </>
