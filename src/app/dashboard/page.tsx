@@ -753,7 +753,7 @@ export default function DashboardPage() {
 
                           <select disabled={!isEditing} value={selectedTechs[job.id] || "Unassigned"} onChange={(e) => setSelectedTechs({ ...selectedTechs, [job.id]: e.target.value })} style={{ padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700" }}>
                             <option value="Unassigned">❌ No Tech Assigned</option>
-                            {users.filter((emp: any) => emp.role === "Technician").map((emp: any, index: number) => (
+                            {Array.isArray(users) && users.filter((emp: any) => emp.role === "Technician").map((emp: any, index: number) => (
                               <option key={`${emp.id}-${index}`} value={emp.name}>
                                 {emp.name}
                               </option>
