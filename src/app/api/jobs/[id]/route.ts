@@ -27,7 +27,8 @@ export async function PUT(request: Request, context: { params: any }) {
         status: computedStatus,
         assignedBay: body.bay !== undefined ? body.bay : existingRecord.assignedBay,
         assignedTech: body.technician !== undefined ? body.technician : existingRecord.assignedTech,
-        completedAt: computedStatus === "Completed" ? new Date() : existingRecord.completedAt
+        completedAt: computedStatus === "Completed" ? new Date() : existingRecord.completedAt,
+        startedAt: computedStatus === "In Progress" && !existingRecord.startedAt ? new Date() : existingRecord.startedAt
       }
     });
 

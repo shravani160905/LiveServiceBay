@@ -44,7 +44,9 @@ model Job {
 
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
-  completedAt     DateTime? 
+  completedAt     DateTime?
+  startedAt       DateTime?
+  ocrWarning      String? 
 
   // Keep these at the bottom untouched for Phase 2/3 relations
   technicianId    String?

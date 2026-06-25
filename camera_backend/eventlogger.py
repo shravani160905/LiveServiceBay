@@ -1,12 +1,16 @@
 """
-event_logger.py  —  MVP v4
+event_logger.py  —  MVP v6
 --------------------------
 Bay Event Logger — single bay, single camera
 
 Architecture:
-- YOLO runs every N frames on ROI → presence trigger AND plate detector
-- Rolling pre-buffer (full frames) → used for clip writing
-- Rolling OCR buffer (ROI crops)  → used for plate reading
+- ROI setup built in — runs interactively on first launch if roi_config.json missing
+- Pipeline is NOW triggered by frontend "Start Service" button, not YOLO presence
+- Polling thread checks Supabase every 5s for In Progress jobs
+- YOLO + OCR run after pipeline is triggered — cross-verifies plate vs vehicleNumber
+- Plate mismatch → writes ocrWarning to Job row → frontend shows alert to technician
+- EXIT triggered by frontend marking job Completed (not YOLO absence)
+- YOLO still runs for OCR crop detection only
 - EDSR 4x upscale → CLAHE → Otsu → EasyOCR with allowlist
 - Positional correction + state code validation for Indian plates
 - Stable frame capture — waits for car to stop before OCR
@@ -14,8 +18,7 @@ Architecture:
 - Entry clip: 3 sec before entry confirmed + 2 sec after
 - Exit clip:  3 sec before exit confirmed + 2 sec after
 - MP4 / H264 format — plays on any device
-- Full frame saved in clips (ROI drawn as overlay)
-- ENTRY + EXIT logged to MySQL bay_events with clip_path and plate_image_path
+- ENTRY + EXIT logged to Supabase PostgreSQL bay_events
 
 Usage:
     python event_logger.py
@@ -24,6 +27,7 @@ Usage:
 
 import cv2
 import easyocr
+import json
 import logging
 import numpy as np
 import os
@@ -67,7 +71,7 @@ logger.addHandler(console_handler)
 BASE_DIR = Path(__file__).parent
 
 # ─────────────────────────────────────────────
-# CONFIGURATION — edit before running
+# CONFIGURATION
 # ─────────────────────────────────────────────
 
 VIDEO_SOURCE = str(BASE_DIR / "new_sample.mp4")
@@ -75,57 +79,202 @@ MODEL_PATH   = str(BASE_DIR / "plate_model.pt")
 ROI_CONFIG   = str(BASE_DIR / "roi_config.json")
 CROPS_DIR    = str(BASE_DIR / "event_crops")
 CLIPS_DIR    = str(BASE_DIR / "event_clips")
+EDSR_MODEL   = str(BASE_DIR / "EDSR_x4.pb")
 
-# EDSR super resolution model path
-# Download EDSR_x4.pb (~38MB):
-#   https://github.com/Saafke/EDSR_TensorFlow/raw/master/models/EDSR_x4.pb
-EDSR_MODEL = str(BASE_DIR / "EDSR_x4.pb")
+POLL_INTERVAL = 5   # seconds between Supabase polls
 
 from dotenv import load_dotenv
 load_dotenv()
 
 SUPABASE_URL = os.getenv("DATABASE_URL")
 
-db_pool = psycopg2.pool.ThreadedConnectionPool(
-    minconn=1,
-    maxconn=5,
-    dsn=SUPABASE_URL
-)
+try:
+    db_pool = psycopg2.pool.ThreadedConnectionPool(
+        minconn=1,
+        maxconn=5,
+        dsn=SUPABASE_URL
+    )
+    logger.info("DB pool initialized successfully")
+except Exception as e:
+    logger.error(f"DB pool init failed: {e}")
+    db_pool = None
 
 # Detection
 YOLO_CONFIDENCE      = 0.4
 DETECT_EVERY_N       = 5
-CONFIRM_FRAMES       = 4
-ABSENT_FRAMES        = 6
 
 # Stable frame detection
-STABLE_FRAMES_NEEDED = 10    # consecutive stable frames before OCR fires
-STABLE_THRESHOLD     = 300   # max changed pixels to consider frame stable
+STABLE_FRAMES_NEEDED = 10
+STABLE_THRESHOLD     = 300
 
 # Buffers
-FPS              = 30   # fallback only — used if src_fps can't be read
+FPS              = 30
 PRE_BUFFER_SECS  = 3
 POST_BUFFER_SECS = 2
-OCR_BUFFER_SECS  = 2    # replaces OCR_BUFFER_SIZE — computed at runtime
+OCR_BUFFER_SECS  = 2
 
 # Plate validation
 INDIAN_PLATE_REGEX = r'^[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{3,4}$'
 
 # ─────────────────────────────────────────────
-# SETUP
+# SETUP DIRS
 # ─────────────────────────────────────────────
 
 os.makedirs(CROPS_DIR, exist_ok=True)
 os.makedirs(CLIPS_DIR, exist_ok=True)
 
+# ─────────────────────────────────────────────
+# ROI SETUP
+# ─────────────────────────────────────────────
+
+def run_roi_setup(video_source, config_file):
+    print("=" * 60)
+    print("  SETUP ROI — Service Bay Region Selector")
+    print("=" * 60)
+    print(f"Source : {video_source}\n")
+    print("INSTRUCTIONS:")
+    print("  1. A window will open showing the video frame")
+    print("  2. Click and drag to draw a box around the service bay")
+    print("  3. Press S to save the ROI and exit")
+    print("  4. Press R to reset and redraw if not happy")
+    print("  5. Press Q to quit without saving\n")
+
+    cap = cv2.VideoCapture(video_source)
+    if not cap.isOpened():
+        logger.error(f"ROI SETUP: Could not open video source: {video_source}")
+        return False
+
+    ret, base_frame = cap.read()
+    cap.release()
+
+    if not ret:
+        logger.error("ROI SETUP: Could not read frame from video.")
+        return False
+
+    h, w   = base_frame.shape[:2]
+    scale  = min(1280 / w, 720 / h, 1.0)
+    if scale < 1.0:
+        base_frame = cv2.resize(base_frame, (int(w * scale), int(h * scale)))
+        h, w       = base_frame.shape[:2]
+
+    logger.info(f"ROI SETUP: Frame size {w}x{h}")
+
+    drawing   = False
+    roi_start = [-1, -1]
+    roi_end   = [-1, -1]
+    roi_final = [None]
+
+    def mouse_callback(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            drawing        = True
+            roi_start[:]   = [x, y]
+            roi_end[:]     = [x, y]
+        elif event == cv2.EVENT_MOUSEMOVE:
+            if flags & cv2.EVENT_FLAG_LBUTTON:
+                roi_end[:] = [x, y]
+        elif event == cv2.EVENT_LBUTTONUP:
+            roi_end[:]     = [x, y]
+            roi_final[0]   = (tuple(roi_start), tuple(roi_end))
+            print(f"[INFO] ROI drawn: top-left {tuple(roi_start)} → bottom-right {tuple(roi_end)}")
+
+    window_name = "ROI Selector — Draw box then press S to save"
+    cv2.namedWindow(window_name)
+    cv2.setMouseCallback(window_name, mouse_callback)
+
+    saved = False
+    while True:
+        display = base_frame.copy()
+
+        cv2.putText(display, "Click and drag to draw ROI box",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        cv2.putText(display, "S = Save  |  R = Reset  |  Q = Quit",
+                    (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+
+        if roi_start[0] != -1 and roi_end[0] != -1:
+            pt1 = tuple(roi_start)
+            pt2 = tuple(roi_end)
+            overlay = display.copy()
+            cv2.rectangle(overlay, pt1, pt2, (0, 255, 0), -1)
+            cv2.addWeighted(overlay, 0.2, display, 0.8, 0, display)
+            cv2.rectangle(display, pt1, pt2, (0, 255, 0), 2)
+            x1 = min(roi_start[0], roi_end[0])
+            y1 = min(roi_start[1], roi_end[1])
+            x2 = max(roi_start[0], roi_end[0])
+            y2 = max(roi_start[1], roi_end[1])
+            cv2.putText(display, f"ROI: ({x1},{y1}) to ({x2},{y2})",
+                        (10, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        cv2.imshow(window_name, display)
+        key = cv2.waitKey(1) & 0xFF
+
+        if key in (ord('s'), ord('S')):
+            if roi_final[0] is None:
+                print("[WARNING] No ROI drawn yet. Draw a box first.")
+            else:
+                x1 = min(roi_final[0][0][0], roi_final[0][1][0])
+                y1 = min(roi_final[0][0][1], roi_final[0][1][1])
+                x2 = max(roi_final[0][0][0], roi_final[0][1][0])
+                y2 = max(roi_final[0][0][1], roi_final[0][1][1])
+                if (x2 - x1) < 50 or (y2 - y1) < 50:
+                    print("[WARNING] ROI too small. Draw a larger box.")
+                else:
+                    config = {
+                        "roi": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                        "frame_width":  w,
+                        "frame_height": h,
+                        "video_source": video_source,
+                        "notes": "ROI coordinates for service bay."
+                    }
+                    with open(config_file, 'w') as f:
+                        json.dump(config, f, indent=4)
+                    logger.info(f"ROI SETUP: Saved to {config_file} — x1={x1}, y1={y1}, x2={x2}, y2={y2}")
+                    saved = True
+                    break
+
+        elif key in (ord('r'), ord('R')):
+            roi_start[:] = [-1, -1]
+            roi_end[:]   = [-1, -1]
+            roi_final[0] = None
+            print("[INFO] ROI reset.")
+
+        elif key in (ord('q'), ord('Q')):
+            print("[INFO] Quit without saving.")
+            break
+
+    cv2.destroyAllWindows()
+    return saved
+
+
+def load_roi_config(config_file):
+    if not os.path.exists(config_file):
+        return None
+    with open(config_file) as f:
+        roi_data = json.load(f)
+    r       = roi_data["roi"]
+    saved_w = roi_data.get("frame_width",  1280)
+    saved_h = roi_data.get("frame_height", 720)
+    rel = {
+        "x1": r["x1"] / saved_w,
+        "y1": r["y1"] / saved_h,
+        "x2": r["x2"] / saved_w,
+        "y2": r["y2"] / saved_h,
+    }
+    logger.info(f"ROI loaded (relative): "
+        f"x1={rel['x1']:.3f}, y1={rel['y1']:.3f}, "
+        f"x2={rel['x2']:.3f}, y2={rel['y2']:.3f}")
+    return rel
+
+# ─────────────────────────────────────────────
+# LOAD MODELS
+# ─────────────────────────────────────────────
+
 logger.info("Loading YOLO model...")
 model = YOLO(MODEL_PATH)
 
 logger.info("Loading EasyOCR...")
-reader      = easyocr.Reader(['en'], gpu=False)  # gpu=True in university lab
+reader      = easyocr.Reader(['en'], gpu=False)
 reader_lock = threading.Lock()
 
-# Load EDSR
 sr = None
 if os.path.exists(EDSR_MODEL):
     try:
@@ -140,27 +289,6 @@ if os.path.exists(EDSR_MODEL):
 else:
     logger.warning("EDSR_x4.pb not found — falling back to INTER_CUBIC upscaling")
 
-# Load ROI config
-roi_rel = None
-if ROI_CONFIG and os.path.exists(ROI_CONFIG):
-    import json
-    with open(ROI_CONFIG) as f:
-        roi_data = json.load(f)
-    r       = roi_data["roi"]
-    saved_w = roi_data.get("frame_width",  1280)
-    saved_h = roi_data.get("frame_height", 720)
-    roi_rel = {
-        "x1": r["x1"] / saved_w,
-        "y1": r["y1"] / saved_h,
-        "x2": r["x2"] / saved_w,
-        "y2": r["y2"] / saved_h,
-    }
-    logger.info(f"ROI loaded (relative): "
-        f"x1={roi_rel['x1']:.3f}, y1={roi_rel['y1']:.3f}, "
-        f"x2={roi_rel['x2']:.3f}, y2={roi_rel['y2']:.3f}")
-else:
-    logger.info("No ROI config — using full frame")
-
 # ─────────────────────────────────────────────
 # DATABASE
 # ─────────────────────────────────────────────
@@ -170,42 +298,108 @@ def get_db():
 
 def release_db(conn):
     db_pool.putconn(conn)
-def get_job_by_plate(plate_number):
-    """Look up a Job in Phase 1 DB by vehicle number. Returns job dict or None."""
+
+def poll_active_jobs():
+    """
+    Returns list of jobs where status = 'In Progress' AND startedAt IS NOT NULL.
+    Each row returned as a dict with job details.
+    """
     conn = None
     try:
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            """SELECT id, "customerName", "phoneNumber", "customerEmail", "bayId", status
+            """SELECT id, "vehicleNumber", "phoneNumber", "customerEmail", "assignedBay", "startedAt"
                FROM "Job"
-               WHERE "vehicleNumber" = %s
-               AND status NOT IN ('Completed', 'Cancelled')
-               ORDER BY "createdAt" DESC
-               LIMIT 1""",
-            (plate_number,)
+               WHERE status = 'In Progress'
+               AND "startedAt" IS NOT NULL
+               ORDER BY "startedAt" ASC"""
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        jobs = []
+        for row in rows:
+            jobs.append({
+                "job_id":         row[0],
+                "vehicle_number": row[1],
+                "phone_number":   row[2],
+                "customer_email": row[3],
+                "assigned_bay":   row[4],
+                "started_at":     row[5],
+            })
+        return jobs
+    except Exception as e:
+        logger.error(f"POLL Job poll failed: {e}")
+        return []
+    finally:
+        if conn:
+            release_db(conn)
+
+def poll_job_completed(job_id):
+    """
+    Returns True if job with job_id has status = 'Completed'.
+    Used to detect frontend-triggered EXIT.
+    """
+    conn = None
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT status FROM "Job" WHERE id = %s""",
+            (job_id,)
         )
         row = cursor.fetchone()
         cursor.close()
-        if row:
-            return {
-                "job_id":         row[0],
-                "customer_name":  row[1],
-                "phone_number":   row[2],
-                "customer_email": row[3],
-                "bay_id":         row[4],
-                "status":         row[5],
-            }
-        return None
+        if row and row[0] == "Completed":
+            return True
+        return False
     except Exception as e:
-        logger.error(f"Job lookup failed for plate {plate_number}: {e}")
-        return None
+        logger.error(f"POLL Job completion check failed for {job_id}: {e}")
+        return False
+    finally:
+        if conn:
+            release_db(conn)
+
+def write_ocr_warning(job_id, ocr_plate, expected_plate):
+    """Writes mismatch warning to Job row so frontend can display alert."""
+    conn = None
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        warning_msg = f"MISMATCH: Camera read {ocr_plate}, job has {expected_plate}"
+        cursor.execute(
+            """UPDATE "Job" SET "ocrWarning" = %s, "updatedAt" = NOW() WHERE id = %s""",
+            (warning_msg, job_id)
+        )
+        conn.commit()
+        cursor.close()
+        logger.warning(f"OCR MISMATCH written to DB — job {job_id}: {warning_msg}")
+    except Exception as e:
+        logger.error(f"Failed to write OCR warning for job {job_id}: {e}")
+    finally:
+        if conn:
+            release_db(conn)
+
+def clear_ocr_warning(job_id):
+    """Clears ocrWarning once plate is verified OK."""
+    conn = None
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            """UPDATE "Job" SET "ocrWarning" = NULL, "updatedAt" = NOW() WHERE id = %s""",
+            (job_id,)
+        )
+        conn.commit()
+        cursor.close()
+        logger.info(f"OCR warning cleared for job {job_id}")
+    except Exception as e:
+        logger.error(f"Failed to clear OCR warning for job {job_id}: {e}")
     finally:
         if conn:
             release_db(conn)
 
 def update_job_status(job_id, status, completed_at=None):
-    """Update Job status in Phase 1 DB."""
     conn = None
     try:
         conn = get_db()
@@ -402,10 +596,10 @@ def positional_correction(text):
     return corrected
 
 # ─────────────────────────────────────────────
-# ROI HELPER
+# ROI HELPERS
 # ─────────────────────────────────────────────
 
-def get_roi_abs(frame_w, frame_h):
+def get_roi_abs(roi_rel, frame_w, frame_h):
     if roi_rel is None:
         return None
     x1 = int(roi_rel["x1"] * frame_w)
@@ -414,9 +608,9 @@ def get_roi_abs(frame_w, frame_h):
     y2 = int(roi_rel["y2"] * frame_h)
     return (x1, y1, x2 - x1, y2 - y1)
 
-def get_roi_frame(frame):
+def get_roi_frame(frame, roi_rel):
     h, w = frame.shape[:2]
-    roi  = get_roi_abs(w, h)
+    roi  = get_roi_abs(roi_rel, w, h)
     if roi is None:
         return frame, 0, 0
     x, y, rw, rh = roi
@@ -426,17 +620,13 @@ def get_roi_frame(frame):
 # STABLE FRAME DETECTION
 # ─────────────────────────────────────────────
 
-def is_roi_stable(frame1, frame2):
-    """
-    Compare ROI regions of two consecutive frames.
-    Returns True if pixel difference is below threshold — car has stopped.
-    """
-    roi1 = get_roi_frame(frame1)[0]
-    roi2 = get_roi_frame(frame2)[0]
+def is_roi_stable(frame1, frame2, roi_rel):
+    roi1 = get_roi_frame(frame1, roi_rel)[0]
+    roi2 = get_roi_frame(frame2, roi_rel)[0]
     if roi1.shape != roi2.shape:
         return False
-    diff = cv2.absdiff(roi1, roi2)
-    gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+    diff    = cv2.absdiff(roi1, roi2)
+    gray    = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
     changed = np.sum(gray > 25)
     return int(changed) < STABLE_THRESHOLD
 
@@ -446,9 +636,9 @@ def is_roi_stable(frame1, frame2):
 
 def majority_vote_ocr(ocr_buffer_snapshot, result_dict, result_lock):
     try:
-        reads = []
-        crops = {}
-        upscale_cache = {}   # cache EDSR result by object id — avoids redundant upscaling
+        reads         = []
+        crops         = {}
+        upscale_cache = {}
 
         for crop_img in ocr_buffer_snapshot:
             if crop_img is None or crop_img.size == 0:
@@ -475,7 +665,7 @@ def majority_vote_ocr(ocr_buffer_snapshot, result_dict, result_lock):
         with result_lock:
             result_dict["plate"] = winner
             result_dict["crop"]  = crops.get(winner)
-            result_dict["done"]   = True
+            result_dict["done"]  = True
     except Exception as e:
         logger.error(f"OCR Thread crashed: {e}")
     finally:
@@ -483,7 +673,7 @@ def majority_vote_ocr(ocr_buffer_snapshot, result_dict, result_lock):
             if not result_dict.get("done"):
                 result_dict["plate"] = None
                 result_dict["crop"]  = None
-                result_dict["done"]   = True
+                result_dict["done"]  = True
 
 def read_plate_from_crop(crop_img, upscale_cache=None):
     crop_id = id(crop_img)
@@ -507,8 +697,8 @@ def read_plate_from_crop(crop_img, upscale_cache=None):
 def save_plate_crop(upscaled_crop, plate_number, event_type):
     if upscaled_crop is None:
         return None
-    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path     = os.path.join(CROPS_DIR, f"{plate_number}_{event_type}_{ts}.jpg")
+    ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(CROPS_DIR, f"{plate_number}_{event_type}_{ts}.jpg")
     cv2.imwrite(path, upscaled_crop, [cv2.IMWRITE_JPEG_QUALITY, 95])
     logger.info(f"CROP Saved: {path}")
     return path
@@ -527,40 +717,38 @@ def ocr_worker(ocr_queue):
 # DB RETRY QUEUE (SQLite fallback)
 # ─────────────────────────────────────────────
 
-RETRY_DB = str(BASE_DIR / "retry_queue.db")
-RETRY_MAX = 5
-RETRY_INTERVAL = 30  # seconds
+RETRY_DB       = str(BASE_DIR / "retry_queue.db")
+RETRY_MAX      = 5
+RETRY_INTERVAL = 30
 
 def init_retry_queue():
     conn = sqlite3.connect(RETRY_DB)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS failed_events (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_type  TEXT,
-            plate       TEXT,
-            image_path  TEXT,
-            clip_path   TEXT,
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type     TEXT,
+            plate          TEXT,
+            image_path     TEXT,
+            clip_path      TEXT,
             full_clip_path TEXT,
-            event_time  TEXT,
-            entry_time  TEXT,
-            retries     INTEGER DEFAULT 0
+            event_time     TEXT,
+            entry_time     TEXT,
+            retries        INTEGER DEFAULT 0
         )
     """)
     conn.commit()
     conn.close()
 
-def queue_failed_event(event_type, plate, image_path, clip_path, event_time, entry_time=None, full_clip_path=None):
+def queue_failed_event(event_type, plate, image_path, clip_path, event_time,
+                        entry_time=None, full_clip_path=None, job_id=None):
     try:
         conn = sqlite3.connect(RETRY_DB)
         conn.execute("""
-            INSERT INTO failed_events (event_type, plate, image_path, clip_path, full_clip_path, event_time, entry_time)
+            INSERT INTO failed_events
+            (event_type, plate, image_path, clip_path, full_clip_path, event_time, entry_time)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
-            event_type,
-            plate,
-            image_path,
-            clip_path,
-            full_clip_path,
+            event_type, plate, image_path, clip_path, full_clip_path,
             event_time.isoformat() if event_time else None,
             entry_time.isoformat() if entry_time else None,
         ))
@@ -585,31 +773,23 @@ def retry_worker():
         try:
             conn = sqlite3.connect(RETRY_DB)
             rows = conn.execute(
-                "SELECT id, event_type, plate, image_path, clip_path, full_clip_path, event_time, entry_time, retries "
-                "FROM failed_events WHERE retries < ? ORDER BY id ASC",
+                "SELECT id, event_type, plate, image_path, clip_path, full_clip_path, "
+                "event_time, entry_time, retries FROM failed_events WHERE retries < ? ORDER BY id ASC",
                 (RETRY_MAX,)
             ).fetchall()
 
-            for row_id, event_type, plate, image_path, clip_path, full_clip_path, event_time, entry_time, retries in rows:
+            for row_id, event_type, plate, image_path, clip_path, full_clip_path, \
+                    event_time, entry_time, retries in rows:
                 event_dt = _parse_retry_time(event_time) or datetime.now()
                 entry_dt = _parse_retry_time(entry_time)
-
                 try:
                     if event_type == "ENTRY":
                         log_entry(plate, image_path, clip_path, event_time=event_dt, _retry=True)
                     elif event_type == "EXIT":
-                        log_exit(
-                            plate,
-                            image_path,
-                            clip_path,
-                            entry_dt or event_dt,
-                            full_clip_path=full_clip_path,
-                            event_time=event_dt,
-                            _retry=True,
-                        )
+                        log_exit(plate, image_path, clip_path, entry_dt or event_dt,
+                                 full_clip_path=full_clip_path, event_time=event_dt, _retry=True)
                     else:
                         raise ValueError(f"Unknown event_type: {event_type}")
-
                     conn.execute("DELETE FROM failed_events WHERE id = ?", (row_id,))
                     conn.commit()
                     logger.info(f"RETRY QUEUE Replayed and cleared: {event_type} {plate}")
@@ -619,14 +799,10 @@ def retry_worker():
                         conn.execute("DELETE FROM failed_events WHERE id = ?", (row_id,))
                         logger.warning(f"RETRY QUEUE Dropped after max retries: {event_type} {plate}")
                     else:
-                        conn.execute(
-                            "UPDATE failed_events SET retries = ? WHERE id = ?",
-                            (new_retries, row_id)
-                        )
-                        logger.warning(
-                            f"RETRY QUEUE Replay failed ({new_retries}/{RETRY_MAX}): "
-                            f"{event_type} {plate} ({e})"
-                        )
+                        conn.execute("UPDATE failed_events SET retries = ? WHERE id = ?",
+                                     (new_retries, row_id))
+                        logger.warning(f"RETRY QUEUE Replay failed ({new_retries}/{RETRY_MAX}): "
+                                       f"{event_type} {plate} ({e})")
                     conn.commit()
         except Exception as e:
             logger.error(f"RETRY QUEUE worker error: {e}")
@@ -638,47 +814,105 @@ init_retry_queue()
 threading.Thread(target=retry_worker, daemon=True).start()
 
 # ─────────────────────────────────────────────
+# POLLING THREAD
+# ─────────────────────────────────────────────
+#
+# Shared state between polling thread and main loop.
+# Main loop reads these; polling thread writes them.
+# Protected by poll_lock.
+#
+# poll_state["trigger"]     — set to job dict when a new In Progress job is found
+# poll_state["exit_signal"] — set to True when active job is marked Completed on frontend
+
+poll_state = {
+    "trigger":     None,   # job dict → tells main loop to start pipeline
+    "exit_signal": False,  # True → tells main loop to trigger EXIT
+}
+poll_lock = threading.Lock()
+
+
+def polling_thread(active_job_id_ref):
+    """
+    Runs every POLL_INTERVAL seconds.
+    - active_job_id_ref is a list[str|None] so we can mutate it from this thread.
+    - Checks for new In Progress jobs → sets poll_state["trigger"]
+    - Checks if active job is now Completed → sets poll_state["exit_signal"]
+    """
+    seen_job_ids = set()  # jobs we've already triggered pipeline for
+
+    while True:
+        time.sleep(POLL_INTERVAL)
+        try:
+            with poll_lock:
+                current_active_id = active_job_id_ref[0]
+
+            # ── Check if active job completed on frontend ──
+            if current_active_id:
+                completed = poll_job_completed(current_active_id)
+                if completed:
+                    logger.info(f"POLL Job {current_active_id} marked Completed on frontend — signalling EXIT")
+                    with poll_lock:
+                        poll_state["exit_signal"] = True
+
+            # ── Check for new In Progress jobs ──
+            jobs = poll_active_jobs()
+            for job in jobs:
+                jid = job["job_id"]
+                if jid not in seen_job_ids and jid != current_active_id:
+                    logger.info(f"POLL New In Progress job found: {jid} — vehicle: {job['vehicle_number']}")
+                    seen_job_ids.add(jid)
+                    with poll_lock:
+                        # Only set trigger if no pipeline is currently active
+                        if poll_state["trigger"] is None and current_active_id is None:
+                            poll_state["trigger"] = job
+
+        except Exception as e:
+            logger.error(f"POLL Thread error: {e}")
+
+# ─────────────────────────────────────────────
 # DRAW PREVIEW OVERLAYS
 # ─────────────────────────────────────────────
 
-def draw_overlay(frame, state, plate, presence_ctr, absent_ctr, ocr_running, stable_ctr, overlay_msgs):
+def draw_overlay(frame, roi_rel, state, plate, expected_plate,
+                 ocr_running, stable_ctr, overlay_msgs, mismatch_warning=None):
     preview = frame.copy()
     fh, fw  = frame.shape[:2]
 
-    # ROI box
-    roi_abs = get_roi_abs(fw, fh)
+    roi_abs = get_roi_abs(roi_rel, fw, fh)
     if roi_abs:
         x, y, w, h = roi_abs
         cv2.rectangle(preview, (x, y), (x + w, y + h), (0, 255, 255), 2)
         cv2.putText(preview, "BAY ROI", (x, y - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
 
-    # State
     color = (0, 255, 0) if state == "IDLE" else (0, 0, 255)
     cv2.putText(preview, f"State: {state}", (10, 35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
-    # Counters
-    cv2.putText(preview, f"Present: {presence_ctr}/{CONFIRM_FRAMES}  Absent: {absent_ctr}/{ABSENT_FRAMES}",
-                (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
+    if expected_plate:
+        cv2.putText(preview, f"Expected: {expected_plate}", (10, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
 
-    # Current plate
     if plate:
-        cv2.putText(preview, f"Plate: {plate}", (10, 95),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 128, 0), 2)
+        plate_color = (0, 255, 0) if plate == expected_plate else (0, 80, 255)
+        cv2.putText(preview, f"OCR Read: {plate}", (10, 95),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, plate_color, 2)
 
-    # Stable frame indicator
     if state == "OCCUPIED":
         stable_color = (0, 255, 0) if stable_ctr >= STABLE_FRAMES_NEEDED else (0, 165, 255)
         cv2.putText(preview, f"Stable: {min(stable_ctr, STABLE_FRAMES_NEEDED)}/{STABLE_FRAMES_NEEDED}",
                     (10, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.55, stable_color, 1)
 
-    # OCR running indicator
     if ocr_running:
         cv2.putText(preview, "OCR running...", (10, 150),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
-    # Timed event messages (top right)
+    # Mismatch warning banner
+    if mismatch_warning:
+        cv2.rectangle(preview, (0, fh - 60), (fw, fh), (0, 0, 180), -1)
+        cv2.putText(preview, f"MISMATCH WARNING: {mismatch_warning}",
+                    (10, fh - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+
     now    = time.time()
     active = [(msg, exp) for msg, exp in overlay_msgs if exp > now]
     overlay_msgs[:] = active
@@ -694,6 +928,16 @@ def draw_overlay(frame, state, plate, presence_ctr, absent_ctr, ocr_running, sta
 # ─────────────────────────────────────────────
 
 def run(source):
+    # ── ROI: setup if missing, load if exists ──
+    if not os.path.exists(ROI_CONFIG):
+        logger.info("ROI config not found — launching ROI setup...")
+        saved = run_roi_setup(source, ROI_CONFIG)
+        if not saved:
+            logger.error("ROI setup cancelled — cannot start event logger without ROI.")
+            return
+
+    roi_rel = load_roi_config(ROI_CONFIG)
+
     logger.info(f"START Opening: {source}")
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
@@ -712,17 +956,18 @@ def run(source):
     OCCUPIED = "OCCUPIED"
     state    = IDLE
 
-    presence_counter = 0
-    absent_counter   = 0
-    current_plate    = None
+    # Active job tracking — shared with polling thread via list reference
+    active_job_id_ref    = [None]   # active_job_id_ref[0] = current job_id or None
+    active_vehicle_number = None    # vehicleNumber from Job — used for cross-verification
+
+    current_plate     = None
     entry_time        = None
     actual_entry_time = None
-    current_job_id = None
+    mismatch_warning  = None        # shown as overlay banner on preview
 
-    # Stable frame tracking
-    stable_frame   = None   # best ROI crop from a stable frame
-    stable_counter = 0      # consecutive stable frames seen
-    prev_frame     = None   # previous frame for stability comparison
+    stable_frame   = None
+    stable_counter = 0
+    prev_frame     = None
 
     post_recording      = False
     post_record_frames  = []
@@ -730,24 +975,33 @@ def run(source):
     pending_clip_type   = None
     pending_clip_frames = []
     pending_clip_path   = None
-    bay_writer          = None      # VideoWriter for full bay clip
-    bay_clip_path       = None      # final path of full bay clip
-    bay_temp_path       = None      # temp path while recording
+    bay_writer          = None
+    bay_clip_path       = None
+    bay_temp_path       = None
 
     ocr_queue         = queue.Queue()
     ocr_result        = {"plate": None, "crop": None, "done": False}
     ocr_lock          = threading.Lock()
     ocr_running       = False
     pending_ocr_event = None
-    pending_exit      = False
 
     worker_thread = threading.Thread(target=ocr_worker, args=(ocr_queue,), daemon=True)
     worker_thread.start()
+
+    # ── Start polling thread ──
+    poll_thread = threading.Thread(
+        target=polling_thread,
+        args=(active_job_id_ref,),
+        daemon=True
+    )
+    poll_thread.start()
+    logger.info(f"POLL Polling thread started — checking every {POLL_INTERVAL}s")
 
     overlay_msgs = []
     frame_num    = 0
 
     logger.info("LOOP Running... Press Q to quit")
+    logger.info("LOOP Waiting for frontend 'Start Service' trigger...")
 
     while True:
         ret, frame = cap.read()
@@ -755,27 +1009,102 @@ def run(source):
             logger.info("END Stream ended.")
             break
 
-        # Resize preserving aspect ratio
         raw_h, raw_w = frame.shape[:2]
         scale = min(1280 / raw_w, 720 / raw_h, 1.0)
         if scale < 1.0:
             frame = cv2.resize(frame, (int(raw_w * scale), int(raw_h * scale)))
 
         frame_num += 1
-        roi_frame, roi_x, roi_y = get_roi_frame(frame)
+        roi_frame, roi_x, roi_y = get_roi_frame(frame, roi_rel)
 
-        # Step 1: pre-buffer
         pre_buffer.append(frame.copy())
 
-        # Step 2: post-buffer recording
+        # ── Check for polling thread signals ──
+        with poll_lock:
+            trigger_job   = poll_state["trigger"]
+            exit_signaled = poll_state["exit_signal"]
+
+            if trigger_job is not None:
+                poll_state["trigger"] = None   # consume trigger
+
+            if exit_signaled:
+                poll_state["exit_signal"] = False   # consume signal
+
+        # ── Handle frontend START trigger → begin pipeline ──
+        if trigger_job is not None and state == IDLE:
+            job = trigger_job
+            logger.info(f"TRIGGER Frontend Start Service received — job: {job['job_id']} "
+                        f"vehicle: {job['vehicle_number']}")
+
+            active_job_id_ref[0]  = job["job_id"]
+            active_vehicle_number = job["vehicle_number"]
+            actual_entry_time     = job["started_at"] or datetime.now()
+            state                 = OCCUPIED
+            stable_frame          = None
+            stable_counter        = 0
+            mismatch_warning      = None
+
+            pending_clip_frames = list(pre_buffer)
+            pending_clip_type   = "ENTRY"
+            post_recording      = True
+            post_record_frames  = []
+
+            bay_ts        = datetime.now().strftime("%Y%m%d_%H%M%S")
+            bay_temp_path = os.path.join(CLIPS_DIR, f"BAY_TEMP_{bay_ts}.mp4")
+            bay_clip_path = os.path.join(CLIPS_DIR, f"BAY_{bay_ts}.mp4")
+            fh, fw        = frame.shape[:2]
+            bay_writer    = get_video_writer(bay_temp_path, fw, fh, int(src_fps))
+            if bay_writer:
+                logger.info(f"BAY CLIP Recording started: {bay_temp_path}")
+                for pre_frame in list(pre_buffer):
+                    bay_writer.write(pre_frame)
+            else:
+                logger.error("BAY CLIP Failed to open VideoWriter for full bay clip")
+
+            overlay_msgs.append((f"STARTED: {active_vehicle_number}", time.time() + 5))
+            logger.info("STABLE Waiting for car to stop before firing OCR...")
+
+        # ── Handle frontend EXIT signal ──
+        if exit_signaled and state == OCCUPIED:
+            logger.info(f"TRIGGER Frontend job completion detected — triggering EXIT")
+
+            if bay_writer is not None:
+                bay_writer.release()
+                bay_writer = None
+                try:
+                    os.rename(bay_temp_path, bay_clip_path)
+                    logger.info(f"BAY CLIP Saved: {bay_clip_path}")
+                except Exception as e:
+                    logger.error(f"BAY CLIP Rename failed: {e}")
+                    bay_clip_path = bay_temp_path
+
+            pending_clip_frames = list(pre_buffer)
+            pending_clip_type   = "EXIT"
+            post_recording      = True
+            post_record_frames  = []
+
+            if not ocr_running:
+                ocr_snapshot      = [stable_frame] * 10 if stable_frame is not None else list(ocr_buffer)
+                pending_ocr_event = "EXIT"
+                with ocr_lock:
+                    ocr_result["plate"] = None
+                    ocr_result["crop"]  = None
+                    ocr_result["done"]  = False
+                ocr_running = True
+                ocr_queue.put((ocr_snapshot, ocr_result, ocr_lock))
+                logger.info("OCR Background thread started for EXIT...")
+
+            state = IDLE
+
+        # ── Post-buffer recording ──
         if post_recording:
             post_record_frames.append(frame.copy())
             if len(post_record_frames) >= post_record_target:
                 post_recording = False
-                clip_frames = list(pending_clip_frames) + post_record_frames
-                clip_type   = pending_clip_type
-                ts          = datetime.now().strftime("%Y%m%d_%H%M%S")
-                clip_path   = os.path.join(CLIPS_DIR, f"{clip_type}_{ts}.mp4")
+                clip_frames    = list(pending_clip_frames) + post_record_frames
+                clip_type      = pending_clip_type
+                ts             = datetime.now().strftime("%Y%m%d_%H%M%S")
+                clip_path      = os.path.join(CLIPS_DIR, f"{clip_type}_{ts}.mp4")
                 pending_clip_path = clip_path
                 if clip_frames:
                     ch, cw = clip_frames[0].shape[:2]
@@ -789,11 +1118,10 @@ def run(source):
                 post_record_frames  = []
                 pending_clip_frames = []
 
-        # Step 3: YOLO detection every N frames
-        plate_detected  = False
+        # ── YOLO detection — only runs when OCCUPIED (for OCR crops) ──
         best_plate_crop = None
 
-        if frame_num % DETECT_EVERY_N == 0:
+        if state == OCCUPIED and frame_num % DETECT_EVERY_N == 0:
             results   = model(roi_frame, conf=YOLO_CONFIDENCE, verbose=False)
             best_conf = 0
             for result in results:
@@ -807,129 +1135,35 @@ def run(source):
                         if crop.size > 0:
                             best_plate_crop = crop
                             best_conf       = conf
-                            plate_detected  = True
             if best_plate_crop is not None:
                 ocr_buffer.append(best_plate_crop.copy())
 
-        # Step 4: State machine — only update counters on YOLO frames
-        yolo_ran = (frame_num % DETECT_EVERY_N == 0)
-
-        if state == IDLE:
-            if yolo_ran:
-                if plate_detected:
-                    presence_counter += 1
-                    absent_counter    = 0
-                else:
-                    presence_counter  = max(0, presence_counter - 1)
-
-            if presence_counter >= CONFIRM_FRAMES:
-                logger.info(f"STATE IDLE -> OCCUPIED (frame {frame_num})")
-                state            = OCCUPIED
-                actual_entry_time = datetime.now()
-                presence_counter = 0
-                absent_counter   = 0
-                stable_frame     = None
-                stable_counter   = 0
-                pending_clip_frames = list(pre_buffer)
-                pending_clip_type   = "ENTRY"
-                post_recording      = True
-                post_record_frames  = []
-                # Start full bay clip recording
-                bay_ts        = datetime.now().strftime("%Y%m%d_%H%M%S")
-                bay_temp_path = os.path.join(CLIPS_DIR, f"BAY_TEMP_{bay_ts}.mp4")
-                bay_clip_path = os.path.join(CLIPS_DIR, f"BAY_{bay_ts}.mp4")
-                fh, fw        = frame.shape[:2]
-                bay_writer    = get_video_writer(bay_temp_path, fw, fh, int(src_fps))
-                bay_writer    = get_video_writer(bay_temp_path, fw, fh, int(src_fps))
-                if bay_writer:
-                    logger.info(f"BAY CLIP Recording started: {bay_temp_path}")
-                    # Write pre-buffer frames so bay clip starts from approach, not just confirmed entry
-                    for pre_frame in list(pre_buffer):
-                        bay_writer.write(pre_frame)
-                    logger.info(f"BAY CLIP Pre-buffer written ({len(pre_buffer)} frames)")
-                else:
-                    logger.error("BAY CLIP Failed to open VideoWriter for full bay clip")
-                # Don't fire OCR immediately — wait for stable frame
-                logger.info("STABLE Waiting for car to stop before firing OCR...")
-
-        elif state == OCCUPIED:
-            # Write frame to full bay clip
+        # ── Stable frame detection + OCR trigger ──
+        if state == OCCUPIED:
             if bay_writer is not None:
                 bay_writer.write(frame)
 
-            if yolo_ran:
-                if not plate_detected:
-                    absent_counter   += 1
-                    presence_counter  = max(0, presence_counter - 1)
-                else:
-                    absent_counter    = max(0, absent_counter - 1)
-                    presence_counter += 1
-
-            # Track frame stability — wait for car to stop
             if prev_frame is not None and not ocr_running:
-                if is_roi_stable(prev_frame, frame):
+                if is_roi_stable(prev_frame, frame, roi_rel):
                     stable_counter += 1
                     if stable_counter == STABLE_FRAMES_NEEDED:
-                        # Car has stopped — grab best crop and fire OCR
-                        roi_crop = get_roi_frame(frame)[0]
+                        roi_crop = get_roi_frame(frame, roi_rel)[0]
                         if roi_crop.size > 0:
                             stable_frame = roi_crop.copy()
                             logger.info(f"STABLE Car stationary — stable frame captured (frame {frame_num})")
-                        # Fire entry OCR now with stable frame
                         ocr_snapshot      = [stable_frame] * 10 if stable_frame is not None else list(ocr_buffer)
                         pending_ocr_event = "ENTRY"
                         with ocr_lock:
-                            ocr_result["plate"]    = None
-                            ocr_result["crop"]     = None
-                            ocr_result["done"]     = False
-                            ocr_result["clip_path"] = None
-                            
+                            ocr_result["plate"] = None
+                            ocr_result["crop"]  = None
+                            ocr_result["done"]  = False
                         ocr_running = True
                         ocr_queue.put((ocr_snapshot, ocr_result, ocr_lock))
                         logger.info("OCR Background thread started for ENTRY (stable frame)...")
                 else:
                     stable_counter = 0
 
-            if absent_counter >= ABSENT_FRAMES:
-                logger.info(f"STATE OCCUPIED -> IDLE (frame {frame_num})")
-                # Finalize full bay clip
-                if bay_writer is not None:
-                    bay_writer.release()
-                    bay_writer = None
-                    try:
-                        os.rename(bay_temp_path, bay_clip_path)
-                        logger.info(f"BAY CLIP Saved: {bay_clip_path}")
-                    except Exception as e:
-                        logger.error(f"BAY CLIP Rename failed: {e}")
-                        bay_clip_path = bay_temp_path  # fallback — keep temp path
-                state            = IDLE
-                absent_counter   = 0
-                presence_counter = 0
-                stable_frame     = None
-                stable_counter   = 0
-                pending_clip_frames = list(pre_buffer)
-                pending_clip_type   = "EXIT"
-                post_recording      = True
-                post_record_frames  = []
-
-                if not ocr_running:
-                    # Use last stable frame for exit OCR if available
-                    ocr_snapshot      = [stable_frame] * 10 if stable_frame is not None else list(ocr_buffer)
-                    pending_ocr_event = "EXIT"
-                    with ocr_lock:
-                        ocr_result["plate"]    = None
-                        ocr_result["crop"]     = None
-                        ocr_result["done"]     = False
-                        ocr_result["clip_path"] = None
-                    ocr_running = True
-                    ocr_queue.put((ocr_snapshot, ocr_result, ocr_lock))
-                    logger.info("OCR Background thread started for EXIT...")
-                else:
-                    # ENTRY OCR still running — flag the exit, handle it when OCR completes
-                    pending_exit = True
-                    logger.info("STATE Exit detected while OCR running — will process after OCR completes")
-
-        # Step 5: Check OCR thread result
+        # ── OCR result handler ──
         with ocr_lock:
             ocr_done = ocr_result.get("done", False)
 
@@ -951,51 +1185,52 @@ def run(source):
                 if event == "ENTRY":
                     current_plate = plate
                     entry_time    = actual_entry_time
+
+                    # ── Cross-verify plate vs vehicleNumber from Job ──
+                    if active_vehicle_number:
+                        if plate == active_vehicle_number:
+                            logger.info(f"OCR VERIFY Match — OCR: {plate} == Job: {active_vehicle_number}")
+                            mismatch_warning = None
+                            clear_ocr_warning(active_job_id_ref[0])
+                        else:
+                            logger.warning(f"OCR VERIFY Mismatch — OCR: {plate} | Job: {active_vehicle_number}")
+                            mismatch_warning = f"OCR: {plate} | Expected: {active_vehicle_number}"
+                            write_ocr_warning(active_job_id_ref[0], plate, active_vehicle_number)
+                            overlay_msgs.append((f"MISMATCH! {plate} vs {active_vehicle_number}", time.time() + 8))
+
                     threading.Thread(
                         target=log_entry,
                         args=(plate, image_path, clip_path),
+                        kwargs={"job_id": active_job_id_ref[0], "event_time": entry_time},
                         daemon=True
                     ).start()
                     overlay_msgs.append((f"ENTRY: {plate}", time.time() + 4))
-
-                    # If exit already happened while OCR was running, fire it now
-                    if pending_exit:
-                        pending_exit = False
-                        threading.Thread(
-                            target=log_exit,
-                            args=(plate, None, None, entry_time or datetime.now()),
-                            kwargs={"full_clip_path": bay_clip_path},
-                            daemon=True
-                        ).start()
-                        bay_clip_path = None
-                        bay_temp_path = None
-                        overlay_msgs.append((f"EXIT: {plate}", time.time() + 4))
-                        current_plate = None
-                        entry_time    = None
 
                 elif event == "EXIT":
                     threading.Thread(
                         target=log_exit,
                         args=(plate, image_path, clip_path, entry_time or datetime.now()),
-                        kwargs={"full_clip_path": bay_clip_path},
+                        kwargs={"full_clip_path": bay_clip_path, "job_id": active_job_id_ref[0]},
                         daemon=True
                     ).start()
-                    bay_clip_path = None
-                    bay_temp_path = None
                     overlay_msgs.append((f"EXIT: {plate}", time.time() + 4))
-                    current_plate = None
-                    entry_time    = None
+
+                    # Reset active job
+                    bay_clip_path         = None
+                    bay_temp_path         = None
+                    current_plate         = None
+                    entry_time            = None
+                    active_job_id_ref[0]  = None
+                    active_vehicle_number = None
+                    mismatch_warning      = None
 
             pending_ocr_event = None
 
-        # Step 6: Update prev_frame for stability detection
         prev_frame = frame.copy()
 
-        # Step 7: Draw preview
         preview = draw_overlay(
-            frame, state, current_plate,
-            presence_counter, absent_counter,
-            ocr_running, stable_counter, overlay_msgs
+            frame, roi_rel, state, current_plate, active_vehicle_number,
+            ocr_running, stable_counter, overlay_msgs, mismatch_warning
         )
         cv2.imshow("Bay Event Logger", preview)
 
@@ -1006,7 +1241,6 @@ def run(source):
 
     ocr_queue.put(None)
     worker_thread.join(timeout=30)
-
     cap.release()
     cv2.destroyAllWindows()
     logger.info("DONE Event logger stopped.")
@@ -1018,5 +1252,12 @@ def run(source):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Bay Event Logger MVP")
     parser.add_argument("--source", default=VIDEO_SOURCE, help="Video file or RTSP URL")
+    parser.add_argument("--reset-roi", action="store_true",
+                        help="Force ROI re-setup even if config already exists")
     args = parser.parse_args()
+
+    if args.reset_roi and os.path.exists(ROI_CONFIG):
+        os.remove(ROI_CONFIG)
+        logger.info("ROI config deleted — will re-run setup")
+
     run(args.source)

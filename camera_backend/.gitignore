@@ -1,0 +1,8 @@
+event_clips/
+event_crops/
+retry_queue.db
+*.log
+.env
+*.mp4
+*.pb
+*.ptw
