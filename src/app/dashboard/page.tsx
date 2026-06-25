@@ -42,10 +42,23 @@ export default function DashboardPage() {
   const [selectedBays, setSelectedBays] = useState<{ [key: string]: string }>({});
   const [editingRows, setEditingRows] = useState<{ [key: string]: boolean }>({});
 
+  // 💬 TOAST NOTIFICATION STATE
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
   const yearOptions = [];
   for (let y = 2026; y >= 2015; y--) {
     yearOptions.push(y.toString());
   }
+
+  // 🚀 LINK GENERATION: WHATSAPP INTEGRATION DISPATCHER
+  const handleSendTrackLink = (customerPhone: string, jobId: string, vehicleNum: string) => {
+    const cleanPhone = customerPhone.replace(/\D/g, "");
+    const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+    const trackingLink = `http://172.16.0.15.nip.io:3000/track?jobId=${jobId}`;
+    const message = `Hello! Your vehicle (${vehicleNum.toUpperCase()}) has been securely stationed in our service bay. Track your real-time CCTV operations thread here: ${trackingLink}`;
+    const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, "_blank");
+  };
 
   // 🎨 ENTERPRISE STATUS BADGE COLOR SCHEME GENERATOR
   const getStatusBadgeStyle = (status: string) => {
@@ -66,37 +79,41 @@ export default function DashboardPage() {
     if (normalizeStatus === "COMPLETED" || normalizeStatus === "DONE") {
       return {
         ...baseStyles,
-        backgroundColor: "#f0fdf4", // Soft emerald tint
-        color: "#16a34a",           // Deep green text
-        borderColor: "#bbf7d0"      // Matching border
+        backgroundColor: "#f0fdf4",
+        color: "#16a34a",
+        borderColor: "#bbf7d0"
       };
     }
     
     if (normalizeStatus === "IN PROGRESS") {
       return {
         ...baseStyles,
-        backgroundColor: "#eff6ff", // Soft corporate blue tint
-        color: "#2563eb",           // Saturated blue text
-        borderColor: "#bfdbfe"      // Matching border
+        backgroundColor: "#eff6ff",
+        color: "#2563eb",
+        borderColor: "#bfdbfe"
       };
     }
 
     if (normalizeStatus === "PENDING" || normalizeStatus === "INTAKE" || normalizeStatus === "PENDING ALLOCATION") {
       return {
         ...baseStyles,
-        backgroundColor: "#fffbeb", // Soft amber tint
-        color: "#d97706",           // Saturated orange/amber text
-        borderColor: "#fde68a"      // Matching border
+        backgroundColor: "#fffbeb",
+        color: "#d97706",
+        borderColor: "#fde68a"
       };
     }
 
-    // Default Fallback / UNASSIGNED status appearance
     return {
       ...baseStyles,
-      backgroundColor: "#f8fafc",   // Slate tint
-      color: "#64748b",             // Charcoal gray text
-      borderColor: "#cbd5e1"        // Matching border
+      backgroundColor: "#f8fafc",
+      color: "#64748b",
+      borderColor: "#cbd5e1"
     };
+  };
+
+  const showToastNotification = (message: string, type: "success" | "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
   };
 
   const refreshAllData = async () => {
@@ -115,7 +132,6 @@ export default function DashboardPage() {
       setUsers(usersData);
       setBays(baysData);
 
-      // 🎯 THE CRUCIAL REFRESH FIX: Read the exact database fields
       const techMap: { [key: string]: string } = {};
       const bayMap: { [key: string]: string } = {};
       jobsData.forEach((job: any) => {
@@ -135,12 +151,62 @@ export default function DashboardPage() {
     refreshAllData();
   }, []);
 
-  // 🔵 POST / PUT: Vehicle Intake Controller
   const handleVehicleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     
-    const payload = { customerName, phoneNumber, customerEmail, vehicleNumber, brandModel, manufactureYear };
+    const nameClean = customerName.trim();
+    const phoneClean = phoneNumber.trim().replace(/\D/g, ""); 
+    const emailClean = customerEmail.trim();
+    const rawVehicle = vehicleNumber.replace(/\s+/g, "").toUpperCase(); 
+
+    const nameRegex = /^[A-Za-z\s]{2,50}$/;
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const vehicleRegex = /^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}$/;
+
+    if (!nameRegex.test(nameClean)) {
+      setFormError("Customer Name must contain letters and spaces only (minimum 2 characters).");
+      return;
+    }
+
+    if (phoneClean.length !== 10 || !/^[6-9]/.test(phoneClean)) {
+      setFormError("Please enter a valid 10-digit Indian mobile number starting with 6-9.");
+      return;
+    }
+
+    if (!emailRegex.test(emailClean)) {
+      setFormError("Invalid email address pattern structure (expected: name@domain.com).");
+      return;
+    }
+
+    if (!vehicleRegex.test(rawVehicle)) {
+      setFormError("Invalid Vehicle Number format. Must match Indian license plate standards (e.g., MH04HK6253).");
+      return;
+    }
+
+    if (!brandModel.trim()) {
+      setFormError("Vehicle Make & Model field value cannot be blank.");
+      return;
+    }
+
+    const state = rawVehicle.substring(0, 2);
+    const rto = rawVehicle.substring(2, 4);
+    const isFourLetterStart = isNaN(Number(rawVehicle.charAt(5))); 
+    const seriesEndIndex = isFourLetterStart ? 6 : 5;
+    const series = rawVehicle.substring(4, seriesEndIndex);
+    const digits = rawVehicle.substring(seriesEndIndex);
+
+    const vehicleClean = `${state} ${rto} ${series} ${digits}`;
+
+    const payload = { 
+      customerName: nameClean, 
+      phoneNumber: phoneClean, 
+      customerEmail: emailClean, 
+      vehicleNumber: vehicleClean, 
+      brandModel: brandModel.trim(), 
+      manufactureYear 
+    };
+    
     const url = editingJobId ? `/api/jobs/${editingJobId}` : "/api/jobs";
     const method = editingJobId ? "PUT" : "POST";
 
@@ -161,6 +227,9 @@ export default function DashboardPage() {
       await refreshAllData();
       setCustomerName(""); setPhoneNumber(""); setCustomerEmail(""); setVehicleNumber(""); setBrandModel(""); setManufactureYear("2022");
       setEditingJobId(null);
+      
+      showToastNotification(method === "PUT" ? "✓ Record updated successfully!" : "✓ New vehicle registered successfully!", "success");
+      
       if(method === "POST") setActiveTab("Job Cards");
     } catch (error) {
       setFormError("Communication breakdown with file registry.");
@@ -181,9 +250,9 @@ export default function DashboardPage() {
   const handleCancelJobEdit = () => {
     setEditingJobId(null);
     setCustomerName(""); setPhoneNumber(""); setCustomerEmail(""); setVehicleNumber(""); setBrandModel(""); setManufactureYear("2022");
+    setFormError(null);
   };
 
-  // 🔴 NEW FUNCTION FIXED IN PLACE: Completely Deletes Checked-In Vehicle
   const handleDeleteJob = async (jobId: string, vehicleNum: string) => {
     if (confirm(`Permanently delete all check-in records for vehicle ${vehicleNum}?`)) {
       try {
@@ -196,21 +265,19 @@ export default function DashboardPage() {
             handleCancelJobEdit();
           }
           await refreshAllData();
+          showToastNotification("✓ Record deleted successfully.", "success");
         } else {
           const errorData = await response.json();
-          alert(`Server Error: ${errorData.error}`);
+          showToastNotification(`❌ Delete failed: ${errorData.error}`, "error");
         }
       } catch (error) {
-        alert("Failed to communicate with the local file server registry.");
+        showToastNotification("❌ Failed to communicate with the registry.", "error");
       }
     }
   };
 
-  // 🟡 PUT: Update Allocations
-  // 🟡 FIXED SAVE CONTROLLER: Reads accurate select states directly
   const handleUpdateAssignment = async (id: string) => {
     try {
-      // 🎯 Grab the values straight from the dropdown maps instead of the unmutated job object
       const chosenBay = selectedBays[id] || "Unassigned";
       const chosenTech = selectedTechs[id] || "Unassigned";
 
@@ -225,7 +292,6 @@ export default function DashboardPage() {
       });
 
       if (response.ok) {
-        // Force update our master array row indicators so everything stays synced
         setJobs(prevJobs => 
           prevJobs.map(job => 
             job.id === id 
@@ -234,44 +300,38 @@ export default function DashboardPage() {
           )
         );
         setEditingRows(prev => ({ ...prev, [id]: false }));
-        alert("Assignment updated and saved securely to Supabase cloud!");
+        showToastNotification("✓ Service bay allocation modified successfully.", "success");
       } else {
-        alert("Failed to sync selection with cloud server.");
+        showToastNotification("❌ Failed to sync layout data with cloud nodes.", "error");
       }
     } catch (error) {
       console.error("Assignment save error:", error);
     }
   };
 
-// 🟢 NEW FUNCTION: Manually Mark a Vehicle Service as Completed
   const handleMarkAsCompleted = async (id: string) => {
-  try {
-    const response = await fetch(`/api/jobs/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        status: "Completed"
-      }),
-    });
+    try {
+      const response = await fetch(`/api/jobs/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "Completed"
+        }),
+      });
 
-    if (response.ok) {
-      // 🎯 THE CRUCIAL PATCH: Use an isolated map update
-      setJobs(prevJobs =>
-        prevJobs.map(job =>
-          job.id === id
-            ? { ...job, status: "Completed" } // Only change the status of the clicked car
-            : job // Leave EVERY other car row's data and dropdowns completely as they are
-        )
-      );
-      alert("Service execution marked as completed successfully.");
-    } else {
-      alert("Failed to update execution status on the cloud server.");
+      if (response.ok) {
+        setJobs(prevJobs =>
+          prevJobs.map(job => job.id === id ? { ...job, status: "Completed" } : job)
+        );
+        showToastNotification("✓ Service profile completed cleanly!", "success");
+      } else {
+        showToastNotification("❌ Failed to execute system closure operations.", "error");
+      }
+    } catch (error) {
+      console.error("Completion handler error:", error);
     }
-  } catch (error) {
-    console.error("Completion handler error:", error);
-  }
-};
-  // 🏢 WORKFORCE LAYER MUTATIONS
+  };
+
   const handleSaveStaffProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -284,6 +344,7 @@ export default function DashboardPage() {
         if (response.ok) {
           setEditingEmpId(null); setEmpName(""); setEmpEmail("");
           await refreshAllData();
+          showToastNotification("✓ Operator details updated.", "success");
         }
       } else {
         const response = await fetch("/api/users", {
@@ -294,6 +355,7 @@ export default function DashboardPage() {
         if (response.ok) {
           setEmpName(""); setEmpEmail("");
           await refreshAllData();
+          showToastNotification("✓ Corporate employee onboarded successfully.", "success");
         }
       }
     } catch (error) {
@@ -305,7 +367,10 @@ export default function DashboardPage() {
     if (confirm("Scrub employee record permanently?")) {
       try {
         const response = await fetch(`/api/users/${empId}`, { method: "DELETE" });
-        if (response.ok) await refreshAllData();
+        if (response.ok) {
+          await refreshAllData();
+          showToastNotification("✓ Staff record cleared cleanly.", "success");
+        }
       } catch (error) {
         console.error(error);
       }
@@ -319,7 +384,6 @@ export default function DashboardPage() {
     setEmpEmail(emp.email);
   };
 
-  // 🛠️ BAY INFRASTRUCTURE CONFIGURATIONS
   const handleRegisterNewBay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newBayName.trim()) return;
@@ -332,6 +396,7 @@ export default function DashboardPage() {
       if (response.ok) {
         setNewBayName("");
         await refreshAllData();
+        showToastNotification("✓ New infrastructure bay expanded.", "success");
       }
     } catch (error) {
       console.error(error);
@@ -342,7 +407,10 @@ export default function DashboardPage() {
     if (confirm(`Decommission workshop coordinates for ${name}?`)) {
       try {
         const response = await fetch(`/api/bays/${bayId}`, { method: "DELETE" });
-        if (response.ok) await refreshAllData();
+        if (response.ok) {
+          await refreshAllData();
+          showToastNotification("✓ Core workshop node decommissioned.", "success");
+        }
       } catch (error) {
         console.error(error);
       }
@@ -353,7 +421,6 @@ export default function DashboardPage() {
     if(confirm("Are you sure you want to log out?")) router.push("/");
   };
 
-  // 🧮 RUNTIME COMPUTED SEARCH + DATE FILTERS
   const getFilteredJobs = () => {
     return jobs.filter((job) => {
       if (job.status === "Completed") return false;
@@ -362,10 +429,7 @@ export default function DashboardPage() {
       if (!matchesSearch) return false;
 
       if (dateFilter === "All") return true;
-
-      if (!job.createdAt) {
-        return dateFilter === "All"; 
-      }
+      if (!job.createdAt) return dateFilter === "All"; 
 
       const jobDate = new Date(job.createdAt);
       const today = new Date();
@@ -409,7 +473,6 @@ export default function DashboardPage() {
     };
   };
 
-  // 💡 Premium CSS Variable style configs for sleek responsive input frames
   const inputStyle = {
     width: "100%",
     padding: "14px", 
@@ -472,10 +535,6 @@ export default function DashboardPage() {
             {/* MODULE: ACTIVE WORKSPACE */}
             {activeTab === "Active Workspace" && (
               <>
-                {/* 📊 UPGRADED ENTERPRISE KPI METRIC CARDS */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "24px", width: "100%" }}>
-                  
-                  {/* 📊 METRICS CARDS WITH REFINED SPACING AND VISUAL ANCHORS */}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "24px", width: "100%" }}>
                   
                   {/* ACTIVE REPAIRS CARD */}
@@ -487,7 +546,7 @@ export default function DashboardPage() {
                       </div>
                       <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", marginTop: "6px" }}>In workshop bays</div>
                     </div>
-                    <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", selectUser: "none", pointerEvents: "none" }}>🔧</div>
+                    <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", userSelect: "none", pointerEvents: "none" }}>🔧</div>
                   </div>
 
                   {/* UNASSIGNED VEHICLES CARD */}
@@ -499,7 +558,7 @@ export default function DashboardPage() {
                       </div>
                       <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", marginTop: "6px" }}>Awaiting allocation</div>
                     </div>
-                    <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", selectUser: "none", pointerEvents: "none" }}>⚠️</div>
+                    <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", userSelect: "none", pointerEvents: "none" }}>⚠️</div>
                   </div>
 
                   {/* COMPLETED VEHICLES CARD */}
@@ -511,10 +570,9 @@ export default function DashboardPage() {
                       </div>
                       <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", marginTop: "6px" }}>Ready for handover</div>
                     </div>
-                    <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", selectUser: "none", pointerEvents: "none" }}>✅</div>
+                    <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", userSelect: "none", pointerEvents: "none" }}>✅</div>
                   </div>
 
-                </div>
                 </div>
 
                 <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
@@ -529,6 +587,7 @@ export default function DashboardPage() {
                         <th style={{ padding: "12px 8px" }}>PHONE</th>
                         <th style={{ padding: "12px 8px" }}>BAY</th>
                         <th style={{ padding: "12px 8px" }}>STATUS</th>
+                        <th style={{ padding: "12px 8px", textAlign: "center" }}>CLIENT PORTAL</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -563,6 +622,24 @@ export default function DashboardPage() {
                                 {job.status || "UNASSIGNED"}
                               </span>
                             </td>
+                            <td style={{ padding: "18px 12px", textAlign: "center" }}>
+                              <button
+                                onClick={() => handleSendTrackLink(job.phoneNumber, job.id, job.vehicleNumber)}
+                                style={{
+                                  padding: "8px 14px",
+                                  backgroundColor: "#16a34a",
+                                  color: "#ffffff",
+                                  border: "none",
+                                  borderRadius: "6px",
+                                  fontSize: "12.5px",
+                                  fontWeight: "800",
+                                  cursor: "pointer",
+                                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
+                                }}
+                              >
+                                💬 Send Live Link
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -572,11 +649,9 @@ export default function DashboardPage() {
               </>
             )}
 
-            {/* MODULE: VEHICLE CHECK-IN & MODIFICATION CONTROL PANEL (SPLIT-VIEW) */}
+            {/* MODULE: VEHICLE CHECK-IN */}
             {activeTab === "Vehicle Check-In" && (
               <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "32px", alignItems: "start", width: "100%" }}>
-                
-                {/* LEFT COLUMN: REGISTRATION INPUT FORM DECK */}
                 <form onSubmit={handleVehicleSubmit} style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
                   {formError && (
                     <div style={{ backgroundColor: "#fef2f2", color: "#b91c1c", padding: "16px", borderRadius: "10px", border: "1px solid #fca5a5", fontSize: "15px", fontWeight: "700" }}>
@@ -643,12 +718,10 @@ export default function DashboardPage() {
                   </div>
                 </form>
 
-                {/* RIGHT COLUMN: ACTIVE INDEX TERMINAL WITH LIVE FILTER CONTROLS */}
                 <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", height: "680px", display: "flex", flexDirection: "column", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                   <h3 style={{ margin: "0 0 4px 0", fontSize: "18px", fontWeight: "800", color:"#0f172a" }}>Active Vehicle Directory</h3>
                   <p style={{ margin: "0 0 16px 0", color: "#64748b", fontSize: "13.5px", fontWeight: "600" }}>Select a vehicle from the directory to modify details or remove entry.</p>
                   
-                  {/* SEARCH AND TIMELINE FILTERS CONTAINER */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
                     <div style={{ position: "relative" }}>
                       <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="🔍 Search by vehicle number..." style={{ width: "100%", padding: "13px 14px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", fontWeight: "600", boxSizing: "border-box" }} />
@@ -663,7 +736,6 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* COMPUTED SCROLLABLE ROWS */}
                   <div style={{ flexGrow: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
                     {getFilteredJobs().length === 0 ? (
                       <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8", fontSize: "14px", fontWeight: "700" }}>📭 No matching vehicle records found.</div>
@@ -678,7 +750,6 @@ export default function DashboardPage() {
                               <div style={{ fontSize: "12.5px", color: "#64748b", marginTop: "6px" }}>Owner: {job.customerName} • {job.phoneNumber}</div>
                             </div>
                             
-                            {/* 🔥 CLEAN SIDE-BY-SIDE BUTTON DESIGN */}
                             <div style={{ display: "flex", gap: "6px" }}>
                               <button type="button" onClick={() => handleStartEditJob(job)} disabled={isBeingEdited} style={{ padding: "9px 15px", backgroundColor: isBeingEdited ? "#cbd5e1" : "#0f172a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "13px", cursor: isBeingEdited ? "not-allowed" : "pointer" }}>
                                 {isBeingEdited ? "⚡ Editing" : "✏️ Modify"}
@@ -694,7 +765,6 @@ export default function DashboardPage() {
                     )}
                   </div>
                 </div>
-
               </div>
             )}
 
@@ -738,6 +808,17 @@ export default function DashboardPage() {
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                   {jobs.map((job) => {
                     const isEditing = !!editingRows[job.id];
+
+                    // 🛑 1. Scan which bays are occupied by OTHER active cars
+                    const occupiedBays = jobs
+                      .filter(j => j.id !== job.id && j.status !== "Completed" && j.assignedBay && j.assignedBay !== "Unassigned")
+                      .map(j => j.assignedBay);
+
+                    // 👤 2. Scan which technicians are busy with OTHER active cars
+                    const occupiedTechs = jobs
+                      .filter(j => j.id !== job.id && j.status !== "Completed" && j.assignedTech && j.assignedTech !== "Unassigned")
+                      .map(j => j.assignedTech);
+
                     return (
                       <div key={job.id} style={{ padding: "20px", border: "1px solid #e2e8f0", borderRadius: "12px", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", backgroundColor: isEditing ? "#f8fafc" : "#ffffff", gap: "16px" }}>
                         <div>
@@ -746,18 +827,52 @@ export default function DashboardPage() {
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                           
-                          <select disabled={!isEditing} value={selectedBays[job.id] || "Unassigned"} onChange={(e) => setSelectedBays({ ...selectedBays, [job.id]: e.target.value })} style={{ padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700" }}>
+                          {/* 🚗 HIDDEN IF OCCUPIED BAY DROPDOWN */}
+                          <select 
+                            disabled={!isEditing} 
+                            value={selectedBays[job.id] || "Unassigned"} 
+                            onChange={(e) => setSelectedBays({ ...selectedBays, [job.id]: e.target.value })} 
+                            style={{ padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700", outline: "none" }}
+                          >
                             <option value="Unassigned">❌ No Bay</option>
-                            {bays.map((b: any) => <option key={b.id} value={b.name}>{b.name}</option>)}
+                            {(() => {
+                              const availableBays = bays.filter((b: any) => !occupiedBays.includes(b.name));
+                              
+                              if (availableBays.length === 0) {
+                                return <option disabled value="None">⚠️ No bays are available</option>;
+                              }
+                              
+                              return availableBays.map((b: any) => (
+                                <option key={b.id} value={b.name}>
+                                  {b.name}
+                                </option>
+                              ));
+                            })()}
                           </select>
 
-                          <select disabled={!isEditing} value={selectedTechs[job.id] || "Unassigned"} onChange={(e) => setSelectedTechs({ ...selectedTechs, [job.id]: e.target.value })} style={{ padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700" }}>
+                          {/* 🔧 HIDDEN IF BUSY TECHNICIAN DROPDOWN */}
+                          <select 
+                            disabled={!isEditing} 
+                            value={selectedTechs[job.id] || "Unassigned"} 
+                            onChange={(e) => setSelectedTechs({ ...selectedTechs, [job.id]: e.target.value })} 
+                            style={{ padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700", outline: "none" }}
+                          >
                             <option value="Unassigned">❌ No Tech Assigned</option>
-                            {Array.isArray(users) && users.filter((emp: any) => emp.role === "Technician").map((emp: any, index: number) => (
-                              <option key={`${emp.id}-${index}`} value={emp.name}>
-                                {emp.name}
-                              </option>
-                            ))}
+                            {(() => {
+                              const availableTechs = Array.isArray(users) 
+                                ? users.filter((emp: any) => emp.role === "Technician" && !occupiedTechs.includes(emp.name))
+                                : [];
+                                
+                              if (availableTechs.length === 0) {
+                                return <option disabled value="None">⚠️ No technicians available</option>;
+                              }
+                              
+                              return availableTechs.map((emp: any, index: number) => (
+                                <option key={`${emp.id}-${index}`} value={emp.name}>
+                                  {emp.name}
+                                </option>
+                              ));
+                            })()}
                           </select>
 
                           {job.status === "Completed" ? (
@@ -766,7 +881,6 @@ export default function DashboardPage() {
                             </span>
                           ) : !editingRows[job.id] ? (
                             <div style={{ display: "flex", gap: "8px" }}>
-                              {/* 🎯 FIXED: Functional wrapper arrow added cleanly inside onClick */}
                               <button type="button" onClick={() => setEditingRows({ ...editingRows, [job.id]: true })} style={{ padding: "10px 18px", backgroundColor: "#0f172a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", fontSize: "13px", cursor: "pointer" }}>
                                 ✏️ Edit
                               </button>
@@ -779,7 +893,7 @@ export default function DashboardPage() {
                             </div>
                           ) : (
                             <button type="button" onClick={() => handleUpdateAssignment(job.id)} style={{ padding: "10px 18px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", fontSize: "13px", cursor: "pointer" }}>
-                              💾 Save
+                              ▶️ Start
                             </button>
                           )}
                         </div>
@@ -790,13 +904,11 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* ⚙️ CENTRALIZED MANAGEMENT SETTINGS BOARD */}
+            {/* MODULE: SETTINGS */}
             {activeTab === "Settings" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "40px", maxWidth: "1100px" }}>
-                
                 <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: "24px", alignItems: "start" }}>
                   
-                  {/* WORKFORCE PANEL REGISTER */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
                       {editingEmpId ? "✏️ Modify Operator Records" : "➕ Onboard Corporate Staff"}
@@ -819,7 +931,6 @@ export default function DashboardPage() {
                     </form>
                   </div>
 
-                  {/* REPAIR BAY INFRASTRUCTURE PANEL */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>🏗️ Expand Station Bays</h3>
                     <p style={{ margin: "0 0 20px 0", color: "#64748b", fontSize: "12px", fontWeight: "600" }}>Provision physical repair bay arrays dynamically.</p>
@@ -835,7 +946,6 @@ export default function DashboardPage() {
 
                 <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: "24px", alignItems: "start" }}>
                   
-                  {/* STAFF RECORDS REGISTRY */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 16px 0", fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Active Center Staff Index</h3>
                     <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
@@ -869,7 +979,6 @@ export default function DashboardPage() {
                     </table>
                   </div>
 
-                  {/* STATION LAYOUT REGISTRY */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 16px 0", fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Service Bay Infrastructure Node</h3>
                     <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
@@ -895,7 +1004,6 @@ export default function DashboardPage() {
                   </div>
 
                 </div>
-
               </div>
             )}
 
@@ -911,6 +1019,34 @@ export default function DashboardPage() {
         )}
 
       </div>
+
+      {/* 🧭 FLOATING PROFESSIONAL TOAST NOTIFICATION CONTAINER */}
+      {toast && (
+        <div style={{
+          position: "fixed",
+          bottom: "24px",
+          right: "24px",
+          backgroundColor: toast.type === "success" ? "#0f172a" : "#991b1b", 
+          color: "#ffffff",
+          padding: "16px 24px",
+          borderRadius: "12px",
+          boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1)",
+          zIndex: 9999,
+          display: "flex",
+          alignItems: "center",
+          gap: "12px",
+          fontSize: "14px",
+          fontWeight: "700",
+          border: toast.type === "success" ? "1px solid #334155" : "1px solid #f87171",
+          transition: "all 0.2s ease"
+        }}>
+          <span style={{ color: toast.type === "success" ? "#4ade80" : "#fca5a5" }}>
+            {toast.type === "success" ? "⚡" : "⚠️"}
+          </span>
+          {toast.message}
+        </div>
+      )}
+
     </div>
   );
 }
