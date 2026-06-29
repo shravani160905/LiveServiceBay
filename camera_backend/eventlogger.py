@@ -24,7 +24,7 @@ Usage:
     python event_logger.py
     python event_logger.py --source rtsp://192.168.1.64/stream
 """
-
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"
 import cv2
 import easyocr
 import json
@@ -433,9 +433,9 @@ def log_entry(plate_number, plate_image_path, clip_path, job_id=None, event_time
         cursor   = conn.cursor()
         cursor.execute(
             """INSERT INTO bay_events
-            (event_id, job_id, plate_number, plate_image, event_type, event_time, clip_path)
-            VALUES (%s, %s, %s, %s, 'ENTRY', %s, %s)""",
-            (event_id, job_id, plate_number, plate_image_path, event_dt, clip_path)
+            (event_id, job_id, plate_number, entry_image, entry_clip, entry_time)
+            VALUES (%s, %s, %s, %s, %s, %s)""",
+            (event_id, job_id, plate_number, plate_image_path, clip_path, event_dt)
         )
         conn.commit()
         cursor.close()
@@ -451,7 +451,6 @@ def log_entry(plate_number, plate_image_path, clip_path, job_id=None, event_time
     return None
 
 def log_exit(plate_number, plate_image_path, clip_path, entry_time, full_clip_path=None, job_id=None, event_time=None, _retry=False):
-    event_id = str(uuid.uuid4())
     try:
         event_dt      = event_time or datetime.now()
         delta         = event_dt - entry_time
@@ -459,23 +458,25 @@ def log_exit(plate_number, plate_image_path, clip_path, entry_time, full_clip_pa
         conn          = get_db()
         cursor        = conn.cursor()
         cursor.execute(
-            """INSERT INTO bay_events
-            (event_id, job_id, plate_number, plate_image, event_type, event_time, duration_mins, clip_path, full_clip_path)
-            VALUES (%s, %s, %s, %s, 'EXIT', %s, %s, %s, %s)""",
-            (event_id, job_id, plate_number, plate_image_path, event_dt, duration_mins, clip_path, full_clip_path)
+            """UPDATE bay_events
+               SET exit_image = %s,
+                   exit_clip = %s,
+                   exit_time = %s,
+                   duration_mins = %s,
+                   full_clip_path = %s
+               WHERE job_id = %s""",
+            (plate_image_path, clip_path, event_dt, duration_mins, full_clip_path, job_id)
         )
         conn.commit()
         cursor.close()
         release_db(conn)
-        logger.info(f"DB EXIT logged -> {plate_number}  duration: {duration_mins} mins  event_id: {event_id}")
-        return event_id
+        logger.info(f"DB EXIT updated -> {plate_number}  duration: {duration_mins} mins  job_id: {job_id}")
     except Exception as e:
-        logger.error(f"DB EXIT log failed: {e}")
+        logger.error(f"DB EXIT update failed: {e}")
         if not _retry:
             queue_failed_event("EXIT", plate_number, plate_image_path, clip_path, event_time or datetime.now(), entry_time, full_clip_path, job_id=job_id)
         if _retry:
             raise
-    return None
 
 # ─────────────────────────────────────────────
 # VIDEO CLIP WRITER
@@ -1006,8 +1007,8 @@ def run(source):
     while True:
         ret, frame = cap.read()
         if not ret:
-            logger.info("END Stream ended.")
-            break
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            continue
 
         raw_h, raw_w = frame.shape[:2]
         scale = min(1280 / raw_w, 720 / raw_h, 1.0)
