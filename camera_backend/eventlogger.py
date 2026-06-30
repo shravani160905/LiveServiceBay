@@ -74,8 +74,8 @@ BASE_DIR = Path(__file__).parent
 # CONFIGURATION
 # ─────────────────────────────────────────────
 
-VIDEO_SOURCE = r"C:\Users\Admin\Desktop\LiveServiceBay\public\test_feed.mp4"
-MODEL_PATH   = r"C:\Users\Admin\Desktop\LiveServiceBay\camera_backend\yolov8n.pt"
+VIDEO_SOURCE = str(BASE_DIR / "new_sample_sample.mp4")
+MODEL_PATH   = str(BASE_DIR / "plate_model.pt")
 ROI_CONFIG   = str(BASE_DIR / "roi_config.json")
 CROPS_DIR    = str(BASE_DIR / "event_crops")
 CLIPS_DIR    = str(BASE_DIR / "event_clips")
@@ -92,18 +92,6 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("DATABASE_URL")
 
-<<<<<<< Updated upstream
-try:
-    db_pool = psycopg2.pool.ThreadedConnectionPool(
-        minconn=1,
-        maxconn=5,
-        dsn=SUPABASE_URL
-    )
-    logger.info("DB pool initialized successfully")
-except Exception as e:
-    logger.error(f"DB pool init failed: {e}")
-    db_pool = None
-=======
 # 🩹 PRISMA TO PSYCOPG2 COMPATIBILITY FIX:
 # If the connection string contains Node.js/Prisma options like connection_limit,
 # clean them out so psycopg2's parser doesn't crash.
@@ -122,7 +110,6 @@ db_pool = psycopg2.pool.ThreadedConnectionPool(
     maxconn=5,
     dsn=SUPABASE_URL
 )
->>>>>>> Stashed changes
 
 # Detection
 YOLO_CONFIDENCE      = 0.4
@@ -202,7 +189,7 @@ def run_roi_setup(video_source, config_file):
             roi_final[0]   = (tuple(roi_start), tuple(roi_end))
             print(f"[INFO] ROI drawn: top-left {tuple(roi_start)} → bottom-right {tuple(roi_end)}")
 
-    window_name = "ROI Selector — Draw box then press S to save"
+    window_name = "ROI Selector - Draw box then press S to save"
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, mouse_callback)
 

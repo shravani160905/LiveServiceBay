@@ -1,12 +1,12 @@
 {
     "roi": {
-        "x1": 137,
-        "y1": 411,
-        "x2": 320,
-        "y2": 470
+        "x1": 0,
+        "y1": 398,
+        "x2": 404,
+        "y2": 723
     },
-    "frame_width": 405,
+    "frame_width": 404,
     "frame_height": 720,
-    "video_source": "C:\\Users\\ONYX\\Desktop\\Aadit\\N025\\internship\\test\\new_sample.mp4",
-    "notes": "ROI coordinates for service bay. Edit video_source to switch to RTSP URL."
+    "video_source": "C:\\Users\\ONYX\\Desktop\\Aadit\\N025\\internship\\test\\LiveServiceBay\\camera_backend\\new_sample_sample.mp4",
+    "notes": "ROI coordinates for service bay."
 }
