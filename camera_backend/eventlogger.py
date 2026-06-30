@@ -24,7 +24,7 @@ Usage:
     python event_logger.py
     python event_logger.py --source rtsp://192.168.1.64/stream
 """
-os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"
+
 import cv2
 import easyocr
 import json
@@ -45,7 +45,7 @@ import sqlite3
 import psycopg2
 import psycopg2.pool
 from ultralytics import YOLO
-
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"
 # ─────────────────────────────────────────────
 # LOGGING SETUP
 # ─────────────────────────────────────────────
@@ -960,6 +960,7 @@ def run(source):
     # Active job tracking — shared with polling thread via list reference
     active_job_id_ref    = [None]   # active_job_id_ref[0] = current job_id or None
     active_vehicle_number = None    # vehicleNumber from Job — used for cross-verification
+    entry_ocr_done = False
 
     current_plate     = None
     entry_time        = None
@@ -1033,6 +1034,7 @@ def run(source):
 
         # ── Handle frontend START trigger → begin pipeline ──
         if trigger_job is not None and state == IDLE:
+            entry_ocr_done = False
             job = trigger_job
             logger.info(f"TRIGGER Frontend Start Service received — job: {job['job_id']} "
                         f"vehicle: {job['vehicle_number']}")
@@ -1144,7 +1146,7 @@ def run(source):
             if bay_writer is not None:
                 bay_writer.write(frame)
 
-            if prev_frame is not None and not ocr_running:
+            if prev_frame is not None and not ocr_running and not entry_ocr_done:
                 if is_roi_stable(prev_frame, frame, roi_rel):
                     stable_counter += 1
                     if stable_counter == STABLE_FRAMES_NEEDED:
@@ -1158,7 +1160,8 @@ def run(source):
                             ocr_result["plate"] = None
                             ocr_result["crop"]  = None
                             ocr_result["done"]  = False
-                        ocr_running = True
+                        ocr_running    = True
+                        entry_ocr_done = True
                         ocr_queue.put((ocr_snapshot, ocr_result, ocr_lock))
                         logger.info("OCR Background thread started for ENTRY (stable frame)...")
                 else:
@@ -1262,3 +1265,5 @@ if __name__ == "__main__":
         logger.info("ROI config deleted — will re-run setup")
 
     run(args.source)
+
+    
