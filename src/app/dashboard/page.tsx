@@ -4,63 +4,91 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export default function DashboardPage() {
-  const router = useRouter();
+  const router = useRouter(); // Next.js Router hook used for programmatically redirecting users (e.g., on logout)
   
-  // 🏢 MASTER SYNCHRONIZED APP STATES
-  const [activeTab, setActiveTab] = useState("Active Workspace");
-  const [hoveredTab, setHoveredTab] = useState<string | null>(null);
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [bays, setBays] = useState<any[]>([]); 
-  const [loading, setLoading] = useState(true);
+  // =========================================================================
+  // 🏢 MASTER SYNCHRONIZED GLOBAL APPLICATION STATES
+  // =========================================================================
+  const [activeTab, setActiveTab] = useState("Active Workspace");           // Controls which panel/module view is currently rendering on screen
+  const [hoveredTab, setHoveredTab] = useState<string | null>(null);         // Tracks the current sidebar menu item being hovered over for dynamic styling
+  const [jobs, setJobs] = useState<any[]>([]);                               // Main directory housing all vehicle check-in records fetched from the database
+  const [users, setUsers] = useState<any[]>([]);                             // Index of onboarded company staff members (Service Advisors and Technicians)
+  const [bays, setBays] = useState<any[]>([]);                               // Physical workshop repair station slots configuration array
+  const [loading, setLoading] = useState(true);                              // Loading banner flag active during background async database data-fetching queries
 
-  // SEARCH & DATE FILTER STATES
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("Active"); // 🎯 Tracks "Active" vs "Completed" cars
-  const [dateFilter, setDateFilter] = useState("All");
+  // =========================================================================
+  // 🔍 DATA SEARCH & FILTERING VIEW STATES
+  // =========================================================================
+  const [searchQuery, setSearchQuery] = useState("");                       // Live raw text filter matching vehicle registration license plate strings
+  const [statusFilter, setStatusFilter] = useState("Active");                 // Segregates active repairs from completed history workflows
+  const [dateFilter, setDateFilter] = useState("All");                       // Isolates operational records by context timing ranges ("All", "Today", "Yesterday")
 
-  // Form Management Intake Registers
-  const [customerName, setCustomerName] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [customerEmail, setCustomerEmail] = useState(""); 
-  const [vehicleNumber, setVehicleNumber] = useState("");
-  const [brandModel, setBrandModel] = useState("");
-  const [manufactureYear, setManufactureYear] = useState("2022"); 
-  const [editingJobId, setEditingJobId] = useState<string | null>(null); 
-  const [formError, setFormError] = useState<string | null>(null);
+  // =========================================================================
+  // 🚗 VEHICLE CHECK-IN INTAKE REGISTER STATES
+  // =========================================================================
+  const [customerName, setCustomerName] = useState("");                       // Customer legal name input register
+  const [phoneNumber, setPhoneNumber] = useState("");                         // Customer primary 10-digit mobile phone contact string
+  const [customerEmail, setCustomerEmail] = useState("");                     // Customer notification destination email text input
+  const [vehicleNumber, setVehicleNumber] = useState("");                     // Raw license tracking number captured from input field standard templates
+  const [brandModel, setBrandModel] = useState("");                           // Vehicle manufacturing description data container (e.g., Tata Safari)
+  const [manufactureYear, setManufactureYear] = useState("2022");             // Selected model inventory release drop-down calendar marker year
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);       // References the unique alphanumeric target key when modifying an existing vehicle check-in record
+  const [formError, setFormError] = useState<string | null>(null);             // Holds input pattern violation error statements rendered directly inside validation warnings
 
-  // Workforce Form Inputs
-  const [empName, setEmpName] = useState("");
-  const [empRole, setEmpRole] = useState("Technician");
-  const [empEmail, setEmpEmail] = useState("");
-  const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
+  // =========================================================================
+  // 👥 WORKFORCE INFRASTRUCTURE ONBOARDING REGISTERS
+  // =========================================================================
+  const [empName, setEmpName] = useState("");                                 // Structural name text field register for new employees
+  const [empRole, setEmpRole] = useState("Technician");                       // Selection marker classifying roles into "Service Advisor" or "Technician" groups
+  const [empEmail, setEmpEmail] = useState("");                               // Corporate communication endpoint target address for staff logins
+  const [editingEmpId, setEditingEmpId] = useState<string | null>(null);       // References the active user index key targeted for field updates in Settings
 
-  // Bay Form Input
-  const [newBayName, setNewBayName] = useState("");
+  // =========================================================================
+  // 🏗️ PHYSICAL WORKSHOP STRUCTURAL INPUT REGISTER
+  // =========================================================================
+  const [newBayName, setNewBayName] = useState("");                           // Simple layout descriptor label deployed for provisioning new stations (e.g., Bay 4)
 
-  const [selectedTechs, setSelectedTechs] = useState<{ [key: string]: string }>({});
-  const [selectedBays, setSelectedBays] = useState<{ [key: string]: string }>({});
-  const [editingRows, setEditingRows] = useState<{ [key: string]: boolean }>({});
+  // =========================================================================
+  // 🔗 DROPDOWN ASSIGNMENT BINDINGS & INLINE ROW EDITING FLAGS
+  // =========================================================================
+  const [selectedTechs, setSelectedTechs] = useState<{ [key: string]: string }>({}); // Key-Value register pinning an employee's name to a specific Job ID key
+  const [selectedBays, setSelectedBays] = useState<{ [key: string]: string }>({});   // Key-Value register pinning a physical bay location designation to a specific Job ID key
+  const [editingRows, setEditingRows] = useState<{ [key: string]: boolean }>({});     // Flags an active workspace tracking row to convert pure text fields into active drop-down selectors
 
-  // 💬 TOAST NOTIFICATION STATE
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  // =========================================================================
+  // 💬 GLOBAL TOAST ALERT STATE
+  // =========================================================================
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null); // Floating pop-up alert system state box
 
+  // Generates a reverse order list array of manufacturing years used to populate vehicle information fields dynamically
   const yearOptions = [];
   for (let y = 2026; y >= 2015; y--) {
     yearOptions.push(y.toString());
   }
 
-  // 🚀 LINK GENERATION: WHATSAPP INTEGRATION DISPATCHER
+  // =========================================================================
+  // 🚀 CUSTOMER COMMUNICATIONS INTERACTION HANDLERS
+  // =========================================================================
+  /**
+   * Sanitizes numbers, builds an online customer monitoring link, and shapes a WhatsApp chat utility link
+   * to push streaming parameters out to the customer's phone instantly.
+   */
   const handleSendTrackLink = (customerPhone: string, jobId: string, vehicleNum: string) => {
-    const cleanPhone = customerPhone.replace(/\D/g, "");
-    const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-    const trackingLink = `http://172.16.0.15.nip.io:3000/track?jobId=${jobId}`;
+    const cleanPhone = customerPhone.replace(/\D/g, "");                       // Cleans all formatting characters, leaving only raw numeric codes
+    const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone; // Enforces the international country prefix dial context code for India (+91)
+    const trackingLink = `http://172.16.0.15.nip.io:3000/track?jobId=${jobId}`;  // Generates the monitoring link tied directly to the unique database job index record
     const message = `Hello! Your vehicle (${vehicleNum.toUpperCase()}) has been securely stationed in our service bay. Track your real-time CCTV operations thread here: ${trackingLink}`;
-    const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
-    window.open(whatsappUrl, "_blank");
+    const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`; // Wraps message blocks into standard URL parameter sets safely
+    window.open(whatsappUrl, "_blank");                                        // Dispatches the communication link task directly inside an independent window context frame
   };
 
-  // 🎨 ENTERPRISE STATUS BADGE COLOR SCHEME GENERATOR
+  // =========================================================================
+  // 🎨 ENTERPRISE VISUAL LAYOUT COLOR STYLE DESIGNATORS
+  // =========================================================================
+  /**
+   * Computes layout variables dynamically based on a vehicle's current tracking state.
+   * Returns a custom color configuration block containing border, font weight, background, and lettering parameters.
+   */
   const getStatusBadgeStyle = (status: string) => {
     const normalizeStatus = status?.toUpperCase() || "";
 
@@ -77,45 +105,35 @@ export default function DashboardPage() {
     };
 
     if (normalizeStatus === "COMPLETED" || normalizeStatus === "DONE") {
-      return {
-        ...baseStyles,
-        backgroundColor: "#f0fdf4",
-        color: "#16a34a",
-        borderColor: "#bbf7d0"
-      };
+      return { ...baseStyles, backgroundColor: "#f0fdf4", color: "#16a34a", borderColor: "#bbf7d0" }; // Green execution theme for finalized assignments
     }
     
     if (normalizeStatus === "IN PROGRESS") {
-      return {
-        ...baseStyles,
-        backgroundColor: "#eff6ff",
-        color: "#2563eb",
-        borderColor: "#bfdbfe"
-      };
+      return { ...baseStyles, backgroundColor: "#eff6ff", color: "#2563eb", borderColor: "#bfdbfe" }; // Blue active execution style for vehicles on site
     }
 
     if (normalizeStatus === "PENDING" || normalizeStatus === "INTAKE" || normalizeStatus === "PENDING ALLOCATION") {
-      return {
-        ...baseStyles,
-        backgroundColor: "#fffbeb",
-        color: "#d97706",
-        borderColor: "#fde68a"
-      };
+      return { ...baseStyles, backgroundColor: "#fffbeb", color: "#d97706", borderColor: "#fde68a" }; // Amber alert palette for vehicles waiting for a bay allocation slot
     }
 
-    return {
-      ...baseStyles,
-      backgroundColor: "#f8fafc",
-      color: "#64748b",
-      borderColor: "#cbd5e1"
-    };
+    return { ...baseStyles, backgroundColor: "#f8fafc", color: "#64748b", borderColor: "#cbd5e1" };   // Fallback muted styling if tracking codes fail to read
   };
 
+  /**
+   * Spawns a floating message panel and tracks it on a background loop to clear itself automatically.
+   */
   const showToastNotification = (message: string, type: "success" | "error") => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    setTimeout(() => setToast(null), 3500); // Clears the toast from the screen layout matrix exactly 3.5 seconds after it triggers
   };
 
+  // =========================================================================
+  // 🔄 SYNCHRONIZED BACKEND DATA SYNCHRONIZATION PIPELINE
+  // =========================================================================
+  /**
+   * Executes a simultaneous asynchronous batch query down to the Next.js API server routes.
+   * Pulls vehicle lists, operator logs, and infrastructure configurations, then maps current assignments to local states.
+   */
   const refreshAllData = async () => {
     try {
       setLoading(true);
@@ -132,6 +150,7 @@ export default function DashboardPage() {
       setUsers(usersData);
       setBays(baysData);
 
+      // Create lookup maps to align drop-down values with saved database configurations across individual vehicle tracking items
       const techMap: { [key: string]: string } = {};
       const bayMap: { [key: string]: string } = {};
       jobsData.forEach((job: any) => {
@@ -141,61 +160,68 @@ export default function DashboardPage() {
       setSelectedTechs(techMap);
       setSelectedBays(bayMap);
     } catch (error) {
-      console.error(error);
+      console.error("Database connection fault tracking failure logs:", error);
     } finally {
       setLoading(false);
     }
   };
 
+  // Lifecycle monitoring hook that executes database calls immediately when the management dashboard first mounts on the client screen
   useEffect(() => {
     refreshAllData();
   }, []);
 
+  // =========================================================================
+  // 💾 POST / PUT: INTAKE CONTROLLER WITH INPUT FORM VALIDATION ENGINE
+  // =========================================================================
+  /**
+   * Standardizes raw fields, verifies regex criteria, splits license plate sequences to match uniform text standards,
+   * and dispatches payload packages up to the system database registry safely.
+   */
   const handleVehicleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     
+    // 🧹 Clean up input values to eliminate trailing whitespaces and isolate raw number sequences
     const nameClean = customerName.trim();
     const phoneClean = phoneNumber.trim().replace(/\D/g, ""); 
     const emailClean = customerEmail.trim();
     const rawVehicle = vehicleNumber.replace(/\s+/g, "").toUpperCase(); 
 
-    const nameRegex = /^[A-Za-z\s]{2,50}$/;
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    const vehicleRegex = /^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}$/;
+    // 🔬 Validation regular expressions
+    const nameRegex = /^[A-Za-z\s]{2,50}$/;                                            // Letters and space strings only (minimum length: 2 characters)
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;             // Enforces standard digital communication syntax properties
+    const vehicleRegex = /^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}$/;                        // Matches uniform Indian high-security license structures (e.g., MH04HK6253)
 
+    // Form data verification guards
     if (!nameRegex.test(nameClean)) {
       setFormError("Customer Name must contain letters and spaces only (minimum 2 characters).");
       return;
     }
-
     if (phoneClean.length !== 10 || !/^[6-9]/.test(phoneClean)) {
       setFormError("Please enter a valid 10-digit Indian mobile number starting with 6-9.");
       return;
     }
-
     if (!emailRegex.test(emailClean)) {
       setFormError("Invalid email address pattern structure (expected: name@domain.com).");
       return;
     }
-
     if (!vehicleRegex.test(rawVehicle)) {
       setFormError("Invalid Vehicle Number format. Must match Indian license plate standards (e.g., MH04HK6253).");
       return;
     }
-
     if (!brandModel.trim()) {
       setFormError("Vehicle Make & Model field value cannot be blank.");
       return;
     }
 
+    // 🎯 Process Uniform License Plate Matrix Spaces dynamically (Converts 'MH04HK6253' into a clean readable string like 'MH 04 HK 6253')
     const state = rawVehicle.substring(0, 2);
     const rto = rawVehicle.substring(2, 4);
     const isFourLetterStart = isNaN(Number(rawVehicle.charAt(5))); 
     const seriesEndIndex = isFourLetterStart ? 6 : 5;
     const series = rawVehicle.substring(4, seriesEndIndex);
     const digits = rawVehicle.substring(seriesEndIndex);
-
     const vehicleClean = `${state} ${rto} ${series} ${digits}`;
 
     const payload = { 
@@ -207,6 +233,7 @@ export default function DashboardPage() {
       manufactureYear 
     };
     
+    // Switches routes automatically to determine if the intake engine should save a brand-new vehicle entry (POST) or update an existing tracking line item (PUT)
     const url = editingJobId ? `/api/jobs/${editingJobId}` : "/api/jobs";
     const method = editingJobId ? "PUT" : "POST";
 
@@ -216,7 +243,6 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
       const result = await response.json();
 
       if (!response.ok) {
@@ -224,18 +250,20 @@ export default function DashboardPage() {
         return;
       }
 
-      await refreshAllData();
+      await refreshAllData(); // Re-sync local dashboard state values with updated cloud files
+      
+      // Reset intake form control hooks to empty base structures
       setCustomerName(""); setPhoneNumber(""); setCustomerEmail(""); setVehicleNumber(""); setBrandModel(""); setManufactureYear("2022");
       setEditingJobId(null);
       
       showToastNotification(method === "PUT" ? "✓ Record updated successfully!" : "✓ New vehicle registered successfully!", "success");
-      
-      if(method === "POST") setActiveTab("Job Cards");
+      if(method === "POST") setActiveTab("Job Cards"); // Automatically shifts views to show newly initialized sheets
     } catch (error) {
       setFormError("Communication breakdown with file registry.");
     }
   };
 
+  // Populates input fields instantly with selected dataset parameters to prepare for a modifications update pass
   const handleStartEditJob = (job: any) => {
     setEditingJobId(job.id);
     setCustomerName(job.customerName);
@@ -247,23 +275,20 @@ export default function DashboardPage() {
     setFormError(null);
   };
 
+  // Cancels an active modification task, safely restoring base variables without overwriting existing entries
   const handleCancelJobEdit = () => {
     setEditingJobId(null);
     setCustomerName(""); setPhoneNumber(""); setCustomerEmail(""); setVehicleNumber(""); setBrandModel(""); setManufactureYear("2022");
     setFormError(null);
   };
 
+  // Removes a specified vehicle tracking check-in record permanently from database storage collections
   const handleDeleteJob = async (jobId: string, vehicleNum: string) => {
     if (confirm(`Permanently delete all check-in records for vehicle ${vehicleNum}?`)) {
       try {
-        const response = await fetch(`/api/jobs/${jobId}`, {
-          method: "DELETE",
-        });
-
+        const response = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
         if (response.ok) {
-          if (editingJobId === jobId) {
-            handleCancelJobEdit();
-          }
+          if (editingJobId === jobId) handleCancelJobEdit();
           await refreshAllData();
           showToastNotification("✓ Record deleted successfully.", "success");
         } else {
@@ -276,6 +301,13 @@ export default function DashboardPage() {
     }
   };
 
+  // =========================================================================
+  // 🔧 WORKSPACE RESOURCE ALLOCATION CONTROL ROUTINES
+  // =========================================================================
+  /**
+   * Commits current drop-down personnel and repair bay selections directly to the database layer,
+   * setting the tracking state profile to "In Progress".
+   */
   const handleUpdateAssignment = async (id: string) => {
     try {
       const chosenBay = selectedBays[id] || "Unassigned";
@@ -284,11 +316,7 @@ export default function DashboardPage() {
       const response = await fetch(`/api/jobs/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bay: chosenBay,              
-          technician: chosenTech,
-          status: "In Progress" 
-        }),
+        body: JSON.stringify({ bay: chosenBay, technician: chosenTech, status: "In Progress" }),
       });
 
       if (response.ok) {
@@ -299,7 +327,7 @@ export default function DashboardPage() {
               : job
           )
         );
-        setEditingRows(prev => ({ ...prev, [id]: false }));
+        setEditingRows(prev => ({ ...prev, [id]: false })); // Exits editing row configuration mode
         showToastNotification("✓ Service bay allocation modified successfully.", "success");
       } else {
         showToastNotification("❌ Failed to sync layout data with cloud nodes.", "error");
@@ -309,20 +337,20 @@ export default function DashboardPage() {
     }
   };
 
+  /**
+   * Shuts down active resource metrics on a vehicle, updating its track status parameter to "Completed"
+   * to immediately free up assigned personnel and physical bays back into general selection drop-downs.
+   */
   const handleMarkAsCompleted = async (id: string) => {
     try {
       const response = await fetch(`/api/jobs/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: "Completed"
-        }),
+        body: JSON.stringify({ status: "Completed" }),
       });
 
       if (response.ok) {
-        setJobs(prevJobs =>
-          prevJobs.map(job => job.id === id ? { ...job, status: "Completed" } : job)
-        );
+        setJobs(prevJobs => prevJobs.map(job => job.id === id ? { ...job, status: "Completed" } : job));
         showToastNotification("✓ Service profile completed cleanly!", "success");
       } else {
         showToastNotification("❌ Failed to execute system closure operations.", "error");
@@ -332,6 +360,12 @@ export default function DashboardPage() {
     }
   };
 
+  // =========================================================================
+  // ⚙️ SYSTEM SETTINGS INFRASTRUCTURE & STAFF REGISTRATION CONTROLLERS
+  // =========================================================================
+  /**
+   * Submits employee profile updates or registers new service staff parameters down into database storage tables.
+   */
   const handleSaveStaffProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -363,6 +397,7 @@ export default function DashboardPage() {
     }
   };
 
+  // Removes a targeted user profile permanently from the workplace data index
   const handleDeleteStaffProfile = async (empId: string) => {
     if (confirm("Scrub employee record permanently?")) {
       try {
@@ -377,6 +412,7 @@ export default function DashboardPage() {
     }
   };
 
+  // Pulls team details directly into settings data input blocks for modifications
   const handleStartEditStaff = (emp: any) => {
     setEditingEmpId(emp.id);
     setEmpName(emp.name);
@@ -384,6 +420,7 @@ export default function DashboardPage() {
     setEmpEmail(emp.email);
   };
 
+  // Deploys a new physical repair bay tracking coordinate into active dashboard display grids
   const handleRegisterNewBay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newBayName.trim()) return;
@@ -403,6 +440,7 @@ export default function DashboardPage() {
     }
   };
 
+  // Removes a technical workspace station bay node configuration block completely from system files
   const handleDeleteBayLayout = async (bayId: string, name: string) => {
     if (confirm(`Decommission workshop coordinates for ${name}?`)) {
       try {
@@ -417,13 +455,21 @@ export default function DashboardPage() {
     }
   };
 
+  // Clears active dashboard session tracking routing parameters to return cleanly to the core gateway home path
   const handleLogout = () => {
     if(confirm("Are you sure you want to log out?")) router.push("/");
   };
 
+  // =========================================================================
+  // 📊 LIVE QUERY DIRECTORY DATA FILTER COMPUTATION ENGINE
+  // =========================================================================
+  /**
+   * Filters the master vehicle dataset array against active text search parameters
+   * and isolated chronological date categories ("All", "Today", "Yesterday").
+   */
   const getFilteredJobs = () => {
     return jobs.filter((job) => {
-      if (job.status === "Completed") return false;
+      if (job.status === "Completed") return false; // Keeps historical records separated from active repair views
 
       const matchesSearch = job.vehicleNumber.toLowerCase().includes(searchQuery.toLowerCase());
       if (!matchesSearch) return false;
@@ -452,6 +498,10 @@ export default function DashboardPage() {
     });
   };
 
+  // =========================================================================
+  // 🎨 DYNAMIC VIEW LAYOUT CSS OBJECT DESIGNATORS
+  // =========================================================================
+  // Generates interactive sidebar element background style properties based on active application tabs and hover triggers
   const getTabStyle = (tabName: string) => {
     const isActive = activeTab === tabName;
     const isHovered = hoveredTab === tabName;
@@ -473,6 +523,7 @@ export default function DashboardPage() {
     };
   };
 
+  // Standardized configuration matrix used uniformly across layout form input components
   const inputStyle = {
     width: "100%",
     padding: "14px", 
@@ -484,16 +535,22 @@ export default function DashboardPage() {
     transition: "border-color 0.2s, box-shadow 0.2s"
   };
 
+  // =========================================================================
+  // 🖥️ MAIN APPLICATION VIEWPORT INTERFACE GRID RENDERER
+  // =========================================================================
   return (
     <div style={{ display: "flex", minHeight: "100vh", width: "100vw", fontFamily: "Arial, sans-serif", backgroundColor: "#f1f5f9", margin: 0, padding: 0, boxSizing: "border-box" }}>
       
-      {/* SIDEBAR NAVIGATION PANEL */}
+      {/* ===================================================================
+          🏢 SECTION: SIDEBAR NAVIGATION AND OPERATOR CONTEXT PANEL
+          =================================================================== */}
       <div style={{ width: "280px", backgroundColor: "#0f172a", color: "#ffffff", display: "flex", flexDirection: "column", padding: "24px 16px", boxSizing: "border-box", borderRight: "1px solid #1e293b" }}>
         <div style={{ marginBottom: "32px", paddingLeft: "8px" }}>
           <h2 style={{ fontSize: "20px", fontWeight: "900", margin: 0 }}>LIVE SERVICE BAY</h2>
           <span style={{ fontSize: "11px", color: "#38bdf8", fontWeight: "700" }}>MANAGEMENT PORTAL</span>
         </div>
 
+        {/* Dynamic Sidebar Menu Link Map Loop */}
         <div style={{ display: "flex", flexDirection: "column", gap: "4px", flexGrow: 1, overflowY: "auto" }}>
           {[
             { name: "Active Workspace", icon: "📊" },
@@ -511,6 +568,7 @@ export default function DashboardPage() {
           ))}
         </div>
 
+        {/* User Identity Context Card in Sidebar Footer */}
         <div style={{ borderTop: "1px solid #1e293b", paddingTop: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ paddingLeft: "8px" }}>
             <div style={{ fontSize: "14px", fontWeight: "700" }}>System Operator</div>
@@ -520,7 +578,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* MAIN TRACKING MONITOR DISPLAY */}
+      {/* ===================================================================
+          🖥️ SECTION: MAIN CONTENT TRACKING DISPLAY FRAMEWORK
+          =================================================================== */}
       <div style={{ flexGrow: 1, padding: "40px", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "32px", overflowY: "auto", height: "100vh" }}>
         
         <div>
@@ -532,12 +592,15 @@ export default function DashboardPage() {
           <div style={{ fontSize: "16px", fontWeight: "700", color: "#64748b" }}>🔄 Querying database storage blocks...</div>
         ) : (
           <>
-            {/* MODULE: ACTIVE WORKSPACE */}
+            {/* ===============================================================
+                📊 SUB-MODULE: ACTIVE WORKSPACE METRICS & MAIN TABLE
+                =============================================================== */}
             {activeTab === "Active Workspace" && (
               <>
+                {/* Upper Metrics Grid Panel Rows */}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "24px", width: "100%" }}>
                   
-                  {/* ACTIVE REPAIRS CARD */}
+                  {/* Metric Card: Active Repair Counter */}
                   <div style={{ backgroundColor: "#ffffff", padding: "24px 28px", borderRadius: "16px", border: "1px solid #e2e8f0", borderLeft: "6px solid #2563eb", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
                       <div style={{ fontSize: "12px", fontWeight: "800", color: "#64748b", letterSpacing: "0.5px" }}>ACTIVE REPAIRS</div>
@@ -549,7 +612,7 @@ export default function DashboardPage() {
                     <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", userSelect: "none", pointerEvents: "none" }}>🔧</div>
                   </div>
 
-                  {/* UNASSIGNED VEHICLES CARD */}
+                  {/* Metric Card: Unallocated Workloads Counter */}
                   <div style={{ backgroundColor: "#ffffff", padding: "24px 28px", borderRadius: "16px", border: "1px solid #e2e8f0", borderLeft: "6px solid #d97706", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
                       <div style={{ fontSize: "12px", fontWeight: "800", color: "#64748b", letterSpacing: "0.5px" }}>UNASSIGNED VEHICLES</div>
@@ -561,7 +624,7 @@ export default function DashboardPage() {
                     <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", userSelect: "none", pointerEvents: "none" }}>⚠️</div>
                   </div>
 
-                  {/* COMPLETED VEHICLES CARD */}
+                  {/* Metric Card: Completed Handover Counter */}
                   <div style={{ backgroundColor: "#ffffff", padding: "24px 28px", borderRadius: "16px", border: "1px solid #e2e8f0", borderLeft: "6px solid #16a34a", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
                       <div style={{ fontSize: "12px", fontWeight: "800", color: "#64748b", letterSpacing: "0.5px" }}>COMPLETED VEHICLES</div>
@@ -572,9 +635,9 @@ export default function DashboardPage() {
                     </div>
                     <div style={{ fontSize: "42px", color: "#f1f5f9", fontWeight: "900", userSelect: "none", pointerEvents: "none" }}>✅</div>
                   </div>
-
                 </div>
 
+                {/* Main Workshop Operations Table Grid Layout */}
                 <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
                   <h3 style={{ margin: "0 0 20px 0", fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>Real-time Master Operations Tracker</h3>
                   <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
@@ -593,20 +656,10 @@ export default function DashboardPage() {
                     <tbody>
                       {jobs.map((job, index) => {
                         const isEvenRow = index % 2 === 0;
-                        const rowBgColor = isEvenRow ? "#ffffff" : "#f8fafc";
+                        const rowBgColor = isEvenRow ? "#ffffff" : "#f8fafc"; // Zebra-striping alternating row background styles
                         
                         return (
-                          <tr 
-                            key={job.id} 
-                            style={{ 
-                              borderBottom: "1px solid #edf2f7", 
-                              fontSize: "14px", 
-                              color: "#334155", 
-                              fontWeight: "600",
-                              backgroundColor: rowBgColor,
-                              transition: "background-color 0.15s ease"
-                            }}
-                          >
+                          <tr key={job.id} style={{ borderBottom: "1px solid #edf2f7", fontSize: "14px", color: "#334155", fontWeight: "600", backgroundColor: rowBgColor, transition: "background-color 0.15s ease" }}>
                             <td style={{ padding: "18px 12px", color: "#2563eb", fontWeight: "800" }}>{job.id}</td>
                             <td style={{ padding: "18px 12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>{job.vehicleNumber}</td>
                             <td style={{ padding: "18px 12px", color: "#0f172a", fontWeight: "700" }}>
@@ -618,25 +671,10 @@ export default function DashboardPage() {
                               {job.bay === "Unassigned" || !job.bay ? "⚠️ Unassigned" : job.bay}
                             </td>
                             <td style={{ padding: "18px 12px" }}>
-                              <span style={getStatusBadgeStyle(job.status)}>
-                                {job.status || "UNASSIGNED"}
-                              </span>
+                              <span style={getStatusBadgeStyle(job.status)}>{job.status || "UNASSIGNED"}</span>
                             </td>
                             <td style={{ padding: "18px 12px", textAlign: "center" }}>
-                              <button
-                                onClick={() => handleSendTrackLink(job.phoneNumber, job.id, job.vehicleNumber)}
-                                style={{
-                                  padding: "8px 14px",
-                                  backgroundColor: "#16a34a",
-                                  color: "#ffffff",
-                                  border: "none",
-                                  borderRadius: "6px",
-                                  fontSize: "12.5px",
-                                  fontWeight: "800",
-                                  cursor: "pointer",
-                                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
-                                }}
-                              >
+                              <button onClick={() => handleSendTrackLink(job.phoneNumber, job.id, job.vehicleNumber)} style={{ padding: "8px 14px", backgroundColor: "#16a34a", color: "#ffffff", border: "none", borderRadius: "6px", fontSize: "12.5px", fontWeight: "800", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
                                 💬 Send Live Link
                               </button>
                             </td>
@@ -649,9 +687,12 @@ export default function DashboardPage() {
               </>
             )}
 
-            {/* MODULE: VEHICLE CHECK-IN */}
+            {/* ===============================================================
+                🚗 SUB-MODULE: VEHICLE CHECK-IN AND SYSTEM INTAKE FORMS
+                =============================================================== */}
             {activeTab === "Vehicle Check-In" && (
               <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "32px", alignItems: "start", width: "100%" }}>
+                {/* Entry Input Form Column Structure */}
                 <form onSubmit={handleVehicleSubmit} style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
                   {formError && (
                     <div style={{ backgroundColor: "#fef2f2", color: "#b91c1c", padding: "16px", borderRadius: "10px", border: "1px solid #fca5a5", fontSize: "15px", fontWeight: "700" }}>
@@ -659,6 +700,7 @@ export default function DashboardPage() {
                     </div>
                   )}
                   
+                  {/* Form Block Section: Customer Ownership Fields */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 6px 0", fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>
                       {editingJobId ? `✏️ Edit Job Record (${editingJobId})` : "🚗 New Vehicle Intake"}
@@ -684,6 +726,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
+                  {/* Form Block Section: Mechanical Identity Attributes */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 20px 0", fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>Vehicle Details</h3>
                     <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
@@ -691,7 +734,7 @@ export default function DashboardPage() {
                       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "16px" }}>
                         <div>
                           <label style={{ display: "block", fontSize: "14.5px", fontWeight: "700", marginBottom: "8px", color: "#334155" }}>Vehicle Registration Number *</label>
-                          <input type="text" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. MH04KW2728" style={{ ...inputStyle, textTransform: "uppercase", fontWeight:"700" }} required />
+                          <input type="text" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="e.g. MH04HK6253" style={{ ...inputStyle, textTransform: "uppercase", fontWeight:"700" }} required />
                         </div>
                         <div>
                           <label style={{ display: "block", fontSize: "14.5px", fontWeight: "700", marginBottom: "8px", color: "#334155" }}>Model Release Year *</label>
@@ -708,6 +751,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
+                  {/* Form Actions Submit Toolbar Panel */}
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
                     {editingJobId && (
                       <button type="button" onClick={handleCancelJobEdit} style={{ padding: "12px 24px", backgroundColor: "#f1f5f9", color: "#334155", border: "1px solid #cbd5e1", borderRadius: "8px", fontWeight: "800", fontSize: "14px", cursor: "pointer" }}>Cancel</button>
@@ -718,6 +762,7 @@ export default function DashboardPage() {
                   </div>
                 </form>
 
+                {/* Right Side Column Layout: Interactive Live Search Directory Cards */}
                 <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", height: "680px", display: "flex", flexDirection: "column", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                   <h3 style={{ margin: "0 0 4px 0", fontSize: "18px", fontWeight: "800", color:"#0f172a" }}>Active Vehicle Directory</h3>
                   <p style={{ margin: "0 0 16px 0", color: "#64748b", fontSize: "13.5px", fontWeight: "600" }}>Select a vehicle from the directory to modify details or remove entry.</p>
@@ -727,6 +772,7 @@ export default function DashboardPage() {
                       <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="🔍 Search by vehicle number..." style={{ width: "100%", padding: "13px 14px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "14px", fontWeight: "600", boxSizing: "border-box" }} />
                     </div>
 
+                    {/* Historical Filter Navigation Toggle Buttons */}
                     <div style={{ display: "flex", backgroundColor: "#f1f5f9", padding: "4px", borderRadius: "8px", gap: "4px" }}>
                       {["All", "Today", "Yesterday"].map((tab) => (
                         <button key={tab} type="button" onClick={() => setDateFilter(tab)} style={{ flexGrow: 1, padding: "10px 12px", border: "none", borderRadius: "6px", fontSize: "13px", fontWeight: "800", cursor: "pointer", transition: "all 0.1s", backgroundColor: dateFilter === tab ? "#ffffff" : "transparent", color: dateFilter === tab ? "#2563eb" : "#64748b", boxShadow: dateFilter === tab ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>
@@ -736,6 +782,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
+                  {/* Render Stack Loop for Active Target Vehicles */}
                   <div style={{ flexGrow: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
                     {getFilteredJobs().length === 0 ? (
                       <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8", fontSize: "14px", fontWeight: "700" }}>📭 No matching vehicle records found.</div>
@@ -758,7 +805,6 @@ export default function DashboardPage() {
                                 🗑️
                               </button>
                             </div>
-
                           </div>
                         );
                       })
@@ -768,7 +814,9 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* MODULE: JOB CARDS */}
+            {/* ===============================================================
+                📝 SUB-MODULE: JOB CARDS SIMPLIFIED VERIFICATION TRACKER
+                =============================================================== */}
             {activeTab === "Job Cards" && (
               <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
                 <h3 style={{ margin: "0 0 20px 0", fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>Active Service Control Records</h3>
@@ -801,7 +849,9 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* MODULE: BAY & TECH ASSIGNMENT */}
+            {/* ===============================================================
+                🔧 SUB-MODULE: BAY & TECHNICIAN EXCLUSIVE ALLOCATION COMPONENT
+                =============================================================== */}
             {activeTab === "Bay & Tech Assignment" && (
               <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
                 <h3 style={{ margin: "0 0 8px 0", fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>Bay Assignment Manager</h3>
@@ -809,12 +859,12 @@ export default function DashboardPage() {
                   {jobs.map((job) => {
                     const isEditing = !!editingRows[job.id];
 
-                    // 🛑 1. Scan which bays are occupied by OTHER active cars
+                    // 🛑 1. Scan active vehicle rows to isolate bay designations occupied by OTHER vehicles
                     const occupiedBays = jobs
                       .filter(j => j.id !== job.id && j.status !== "Completed" && j.assignedBay && j.assignedBay !== "Unassigned")
                       .map(j => j.assignedBay);
 
-                    // 👤 2. Scan which technicians are busy with OTHER active cars
+                    // 👤 2. Scan active vehicle rows to isolate technicians currently busy with OTHER vehicles
                     const occupiedTechs = jobs
                       .filter(j => j.id !== job.id && j.status !== "Completed" && j.assignedTech && j.assignedTech !== "Unassigned")
                       .map(j => j.assignedTech);
@@ -827,7 +877,7 @@ export default function DashboardPage() {
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                           
-                          {/* 🚗 HIDDEN IF OCCUPIED BAY DROPDOWN */}
+                          {/* 🚗 DYNAMICALLY FILTERED DISAPPEARING PHYSICAL REPAIR BAY DROP-DOWN */}
                           <select 
                             disabled={!isEditing} 
                             value={selectedBays[job.id] || "Unassigned"} 
@@ -836,21 +886,21 @@ export default function DashboardPage() {
                           >
                             <option value="Unassigned">❌ No Bay</option>
                             {(() => {
+                              // Filter out any bays currently occupied by other vehicles
                               const availableBays = bays.filter((b: any) => !occupiedBays.includes(b.name));
                               
+                              // If no bays are vacant, provide a dynamic warning state placeholder option
                               if (availableBays.length === 0) {
                                 return <option disabled value="None">⚠️ No bays are available</option>;
                               }
                               
                               return availableBays.map((b: any) => (
-                                <option key={b.id} value={b.name}>
-                                  {b.name}
-                                </option>
+                                <option key={b.id} value={b.name}>{b.name}</option>
                               ));
                             })()}
                           </select>
 
-                          {/* 🔧 HIDDEN IF BUSY TECHNICIAN DROPDOWN */}
+                          {/* 🔧 DYNAMICALLY FILTERED DISAPPEARING TECHNICIAN DROPDOWN */}
                           <select 
                             disabled={!isEditing} 
                             value={selectedTechs[job.id] || "Unassigned"} 
@@ -859,32 +909,30 @@ export default function DashboardPage() {
                           >
                             <option value="Unassigned">❌ No Tech Assigned</option>
                             {(() => {
+                              // Filter out any technicians currently busy with other vehicles
                               const availableTechs = Array.isArray(users) 
                                 ? users.filter((emp: any) => emp.role === "Technician" && !occupiedTechs.includes(emp.name))
                                 : [];
                                 
+                              // If all qualified workshop mechanics are busy, toggle a dynamic warning placeholder
                               if (availableTechs.length === 0) {
                                 return <option disabled value="None">⚠️ No technicians available</option>;
                               }
                               
                               return availableTechs.map((emp: any, index: number) => (
-                                <option key={`${emp.id}-${index}`} value={emp.name}>
-                                  {emp.name}
-                                </option>
+                                <option key={`${emp.id}-${index}`} value={emp.name}>{emp.name}</option>
                               ));
                             })()}
                           </select>
 
+                          {/* Dynamic Workspace Context Routing Control Buttons */}
                           {job.status === "Completed" ? (
-                            <span style={getStatusBadgeStyle("Completed")}>
-                              ✅ Done
-                            </span>
+                            <span style={getStatusBadgeStyle("Completed")}>✅ Done</span>
                           ) : !editingRows[job.id] ? (
                             <div style={{ display: "flex", gap: "8px" }}>
                               <button type="button" onClick={() => setEditingRows({ ...editingRows, [job.id]: true })} style={{ padding: "10px 18px", backgroundColor: "#0f172a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", fontSize: "13px", cursor: "pointer" }}>
                                 ✏️ Edit
                               </button>
-                              
                               {job.status === "In Progress" && (
                                 <button type="button" onClick={() => handleMarkAsCompleted(job.id)} style={{ padding: "10px 18px", backgroundColor: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", borderRadius: "8px", fontWeight: "800", fontSize: "13px", cursor: "pointer" }}>
                                   ✅ Complete Service
@@ -904,11 +952,15 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* MODULE: SETTINGS */}
+            {/* ===============================================================
+                ⚙️ SUB-MODULE: SYSTEM INFRASTRUCTURE CONTROL AND CORPORATE SETTINGS
+                =============================================================== */}
             {activeTab === "Settings" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "40px", maxWidth: "1100px" }}>
+                {/* Upper Input Layout Forms: Onboard Employees & Provision New Station Bays */}
                 <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: "24px", alignItems: "start" }}>
                   
+                  {/* Panel Block: Corporate Onboarding Registry Form */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
                       {editingEmpId ? "✏️ Modify Operator Records" : "➕ Onboard Corporate Staff"}
@@ -931,6 +983,7 @@ export default function DashboardPage() {
                     </form>
                   </div>
 
+                  {/* Panel Block: Physical Station Bay Deployment Form */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 4px 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>🏗️ Expand Station Bays</h3>
                     <p style={{ margin: "0 0 20px 0", color: "#64748b", fontSize: "12px", fontWeight: "600" }}>Provision physical repair bay arrays dynamically.</p>
@@ -941,11 +994,12 @@ export default function DashboardPage() {
                       </button>
                     </form>
                   </div>
-
                 </div>
 
+                {/* Lower Layout Tables Index: Manage Registered Staff & Decommission Stations */}
                 <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: "24px", alignItems: "start" }}>
                   
+                  {/* Master Corporate Employee List Grid Matrix */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 16px 0", fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Active Center Staff Index</h3>
                     <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
@@ -979,6 +1033,7 @@ export default function DashboardPage() {
                     </table>
                   </div>
 
+                  {/* Physical Service Station Infrastructure Map Index Matrix */}
                   <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                     <h3 style={{ margin: "0 0 16px 0", fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Service Bay Infrastructure Node</h3>
                     <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
@@ -1002,12 +1057,13 @@ export default function DashboardPage() {
                       </tbody>
                     </table>
                   </div>
-
                 </div>
               </div>
             )}
 
-            {/* FALLBACK CONTROL BACKDROP */}
+            {/* ===============================================================
+                📡 FALLBACK GENERIC BACKDROP PANEL (FOR MODULES UNDER DEVELOPMENT)
+                =============================================================== */}
             {["Camera Mapping", "Service Session", "Report"].includes(activeTab) && (
               <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", padding: "60px", textAlign: "center", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
                 <div style={{ fontSize: "48px", marginBottom: "16px" }}>📡</div>
@@ -1017,10 +1073,11 @@ export default function DashboardPage() {
             )}
           </>
         )}
-
       </div>
 
-      {/* 🧭 FLOATING PROFESSIONAL TOAST NOTIFICATION CONTAINER */}
+      {/* ===================================================================
+          🧭 FLOATING PROFESSIONALLY DESIGNED SYSTEM NOTIFICATION TOAST CARD
+          =================================================================== */}
       {toast && (
         <div style={{
           position: "fixed",

@@ -74,8 +74,8 @@ BASE_DIR = Path(__file__).parent
 # CONFIGURATION
 # ─────────────────────────────────────────────
 
-VIDEO_SOURCE = str(BASE_DIR / "new_sample.mp4")
-MODEL_PATH   = str(BASE_DIR / "plate_model.pt")
+VIDEO_SOURCE = r"C:\Users\Admin\Desktop\LiveServiceBay\public\test_feed.mp4"
+MODEL_PATH   = r"C:\Users\Admin\Desktop\LiveServiceBay\camera_backend\yolov8n.pt"
 ROI_CONFIG   = str(BASE_DIR / "roi_config.json")
 CROPS_DIR    = str(BASE_DIR / "event_crops")
 CLIPS_DIR    = str(BASE_DIR / "event_clips")
@@ -83,11 +83,16 @@ EDSR_MODEL   = str(BASE_DIR / "EDSR_x4.pb")
 
 POLL_INTERVAL = 5   # seconds between Supabase polls
 
+# ─────────────────────────────────────────────
+# DATABASE CONNECTION INITIALIZATION
+# ─────────────────────────────────────────────
+
 from dotenv import load_dotenv
 load_dotenv()
 
 SUPABASE_URL = os.getenv("DATABASE_URL")
 
+<<<<<<< Updated upstream
 try:
     db_pool = psycopg2.pool.ThreadedConnectionPool(
         minconn=1,
@@ -98,6 +103,26 @@ try:
 except Exception as e:
     logger.error(f"DB pool init failed: {e}")
     db_pool = None
+=======
+# 🩹 PRISMA TO PSYCOPG2 COMPATIBILITY FIX:
+# If the connection string contains Node.js/Prisma options like connection_limit,
+# clean them out so psycopg2's parser doesn't crash.
+if SUPABASE_URL and "?" in SUPABASE_URL:
+    base_url, query_params = SUPABASE_URL.split("?", 1)
+    # Rebuild the query string filtering out "connection_limit" or "pool_timeout"
+    clean_params = [p for p in query_params.split("&") if not p.startswith("connection_limit") and not p.startswith("pool_timeout")]
+    if clean_params:
+        SUPABASE_URL = base_url + "?" + "&".join(clean_params)
+    else:
+        SUPABASE_URL = base_url
+
+# Initialize the connection pool using the cleaned database URL string
+db_pool = psycopg2.pool.ThreadedConnectionPool(
+    minconn=1,
+    maxconn=5,
+    dsn=SUPABASE_URL
+)
+>>>>>>> Stashed changes
 
 # Detection
 YOLO_CONFIDENCE      = 0.4
