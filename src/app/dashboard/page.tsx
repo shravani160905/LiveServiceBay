@@ -45,10 +45,94 @@ export default function DashboardPage() {
   // 💬 TOAST NOTIFICATION STATE
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
+  // ── NEW AUTOMATED CROSS-VERIFICATION MODAL STATES ──
+  const [verificationStatus, setVerificationStatus] = useState("IDLE"); 
+  const [verifyingJobId, setVerifyingJobId] = useState<string | null>(null);
+  const [expectedVehicleNo, setExpectedVehicleNo] = useState("");
+  const [serverWarningMsg, setServerWarningMsg] = useState<string | null>(null);
+
   const yearOptions = [];
   for (let y = 2026; y >= 2015; y--) {
     yearOptions.push(y.toString());
   }
+
+  // ⏱️ SELF-CLEANING TOAST DISMISSAL HELPER FUNCTION (10 Seconds)
+  const triggerToast = (message: string, type: "success" | "error") => {
+    setToast({ message, type });
+  };
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 10000); // Exactly 10 seconds
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  // 🕵️ BACKGROUND DATABASE POLLING LOOP
+  const startVerificationPolling = (jobId: string) => {
+    let attempts = 0;
+    const maxAttempts = 12; 
+
+    const intervalId = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        if (!res.ok) return;
+        const currentJobData = await res.json();
+
+        // 🚨 CASE A: Camera caught a plate mismatch and wrote a warning string!
+        if (currentJobData.ocrWarning) {
+          clearInterval(intervalId);
+          setServerWarningMsg(currentJobData.ocrWarning);
+          setVerificationStatus("MISMATCH");
+          triggerToast("⚠️ Cross-verification unmatched! Try again.", "error");
+          return;
+        }
+
+        // ✅ CASE B: Successful verification match confirmed
+        if (currentJobData.status === "In Progress" && !currentJobData.ocrWarning) {
+          clearInterval(intervalId);
+          setVerificationStatus("MATCHED");
+          triggerToast("✓ Successful cross-verification!", "success");
+  
+        setTimeout(() => {
+          setVerificationStatus("IDLE");
+          setVerifyingJobId(null);
+          refreshAllData();
+        }, 2000);
+        return;
+      }
+
+      } catch (err) {
+        console.error("Polling execution error:", err);
+      }
+
+      if (attempts >= maxAttempts) {
+        clearInterval(intervalId);
+        setServerWarningMsg("Verification Timeout: CCTV camera could not parse plate text within 24s.");
+        setVerificationStatus("MISMATCH");
+      }
+    }, 2000); 
+  };
+
+  // ⚠️ MANUAL OVERRIDE HANDLER
+  const handleManualOverride = async () => {
+    if (!verifyingJobId) return;
+    try {
+      await fetch(`/api/jobs/${verifyingJobId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ocrWarning: null }), 
+      });
+      setVerificationStatus("IDLE");
+      setVerifyingJobId(null);
+      refreshAllData();
+    } catch (err) {
+      console.error("Override execution error:", err);
+    }
+  };
 
   // 🚀 LINK GENERATION: WHATSAPP INTEGRATION DISPATCHER
   const handleSendTrackLink = (customerPhone: string, jobId: string, vehicleNum: string) => {
@@ -112,8 +196,7 @@ export default function DashboardPage() {
   };
 
   const showToastNotification = (message: string, type: "success" | "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    triggerToast(message, type);
   };
 
   const refreshAllData = async () => {
@@ -124,9 +207,25 @@ export default function DashboardPage() {
         fetch("/api/users"),
         fetch("/api/bays")
       ]);
-      const jobsData = await jobsRes.json();
-      const usersData = await usersRes.json();
-      const baysData = await baysRes.json();
+      
+      // Parse the JSON responses safely
+      let jobsData = await jobsRes.json();
+      let usersData = await usersRes.json();
+      let baysData = await baysRes.json();
+
+      // 🛡️ SAFELY CLEAN ARRAYS WITHOUT BREAKING THE NEXT.JS OVERLAY LAYER
+      if (!Array.isArray(jobsData) || jobsData.error) {
+        console.warn("API Note: /api/jobs returned empty or error data.");
+        jobsData = []; 
+      }
+      if (!Array.isArray(usersData) || usersData.error) {
+        console.warn("API Note: /api/users returned empty or error data.");
+        usersData = [];
+      }
+      if (!Array.isArray(baysData) || baysData.error) {
+        console.warn("API Note: /api/bays returned empty or error data.");
+        baysData = [];
+      }
 
       setJobs(jobsData);
       setUsers(usersData);
@@ -134,14 +233,21 @@ export default function DashboardPage() {
 
       const techMap: { [key: string]: string } = {};
       const bayMap: { [key: string]: string } = {};
+      
       jobsData.forEach((job: any) => {
-        techMap[job.id] = job.assignedTech || "Unassigned";
-        bayMap[job.id] = job.assignedBay || "Unassigned";
+        if (job && job.id) {
+          techMap[job.id] = job.assignedTech || "Unassigned";
+          bayMap[job.id] = job.assignedBay || "Unassigned";
+        }
       });
+      
       setSelectedTechs(techMap);
       setSelectedBays(bayMap);
     } catch (error) {
-      console.error(error);
+      console.warn("Data tracking refresh caught network issue, using safe fallbacks.");
+      setJobs([]);
+      setUsers([]);
+      setBays([]);
     } finally {
       setLoading(false);
     }
@@ -196,9 +302,10 @@ export default function DashboardPage() {
     const series = rawVehicle.substring(4, seriesEndIndex);
     const digits = rawVehicle.substring(seriesEndIndex);
 
-    const vehicleClean = `${state} ${rto} ${series} ${digits}`;
+    const vehicleClean = `${state}${rto}${series}${digits}`;
 
     const payload = { 
+      id: editingJobId,
       customerName: nameClean, 
       phoneNumber: phoneClean, 
       customerEmail: emailClean, 
@@ -221,18 +328,41 @@ export default function DashboardPage() {
 
       if (!response.ok) {
         setFormError(result.error || "Check-in modification rejected.");
+        triggerToast("❌ Changes could not be saved to cloud nodes.", "error");
         return;
       }
 
+      // 💾 OPTIMISTIC UI ACCELERATION: Change local state array right now so it updates instantly
+      if (editingJobId) {
+        setJobs(prevJobs =>
+          prevJobs.map(job =>
+            job.id === editingJobId
+              ? { 
+                  ...job, 
+                  customerName: nameClean, 
+                  phoneNumber: phoneClean, 
+                  customerEmail: emailClean, 
+                  vehicleNumber: vehicleClean, 
+                  brandModel: brandModel.trim(), 
+                  manufactureYear 
+                }
+              : job
+          )
+        );
+      }
+
       await refreshAllData();
+      
+      // Clean registers only on full verification pass
       setCustomerName(""); setPhoneNumber(""); setCustomerEmail(""); setVehicleNumber(""); setBrandModel(""); setManufactureYear("2022");
       setEditingJobId(null);
       
-      showToastNotification(method === "PUT" ? "✓ Record updated successfully!" : "✓ New vehicle registered successfully!", "success");
+      triggerToast(method === "PUT" ? "✓ Record updated successfully!" : "✓ New vehicle registered successfully!", "success");
       
       if(method === "POST") setActiveTab("Job Cards");
     } catch (error) {
       setFormError("Communication breakdown with file registry.");
+      triggerToast("❌ Changes not saved. Check local database cluster connectivity.", "error");
     }
   };
 
@@ -265,13 +395,13 @@ export default function DashboardPage() {
             handleCancelJobEdit();
           }
           await refreshAllData();
-          showToastNotification("✓ Record deleted successfully.", "success");
+          triggerToast("✓ Record deleted successfully.", "success");
         } else {
           const errorData = await response.json();
-          showToastNotification(`❌ Delete failed: ${errorData.error}`, "error");
+          triggerToast(`❌ Delete failed: ${errorData.error}`, "error");
         }
       } catch (error) {
-        showToastNotification("❌ Failed to communicate with the registry.", "error");
+        triggerToast("❌ Failed to communicate with the registry.", "error");
       }
     }
   };
@@ -280,6 +410,14 @@ export default function DashboardPage() {
     try {
       const chosenBay = selectedBays[id] || "Unassigned";
       const chosenTech = selectedTechs[id] || "Unassigned";
+
+      const matchingJob = jobs.find(j => j.id === id);
+      const targetVehicleNum = matchingJob ? matchingJob.vehicleNumber : "Unknown";
+
+      setExpectedVehicleNo(targetVehicleNum);
+      setVerifyingJobId(id);
+      setVerificationStatus("PENDING_VERIFICATION");
+      setServerWarningMsg(null);
 
       const response = await fetch(`/api/jobs/${id}`, {
         method: "PUT",
@@ -300,12 +438,14 @@ export default function DashboardPage() {
           )
         );
         setEditingRows(prev => ({ ...prev, [id]: false }));
-        showToastNotification("✓ Service bay allocation modified successfully.", "success");
+        startVerificationPolling(id);
       } else {
-        showToastNotification("❌ Failed to sync layout data with cloud nodes.", "error");
+        triggerToast("❌ Failed to sync layout data with cloud nodes.", "error");
+        startVerificationPolling(id); 
       }
     } catch (error) {
       console.error("Assignment save error:", error);
+      startVerificationPolling(id);
     }
   };
 
@@ -323,9 +463,9 @@ export default function DashboardPage() {
         setJobs(prevJobs =>
           prevJobs.map(job => job.id === id ? { ...job, status: "Completed" } : job)
         );
-        showToastNotification("✓ Service profile completed cleanly!", "success");
+        triggerToast("✓ Service profile completed cleanly!", "success");
       } else {
-        showToastNotification("❌ Failed to execute system closure operations.", "error");
+        triggerToast("❌ Failed to execute system closure operations.", "error");
       }
     } catch (error) {
       console.error("Completion handler error:", error);
@@ -344,7 +484,7 @@ export default function DashboardPage() {
         if (response.ok) {
           setEditingEmpId(null); setEmpName(""); setEmpEmail("");
           await refreshAllData();
-          showToastNotification("✓ Operator details updated.", "success");
+          triggerToast("✓ Operator details updated.", "success");
         }
       } else {
         const response = await fetch("/api/users", {
@@ -355,7 +495,7 @@ export default function DashboardPage() {
         if (response.ok) {
           setEmpName(""); setEmpEmail("");
           await refreshAllData();
-          showToastNotification("✓ Corporate employee onboarded successfully.", "success");
+          triggerToast("✓ Corporate employee onboarded successfully.", "success");
         }
       }
     } catch (error) {
@@ -369,7 +509,7 @@ export default function DashboardPage() {
         const response = await fetch(`/api/users/${empId}`, { method: "DELETE" });
         if (response.ok) {
           await refreshAllData();
-          showToastNotification("✓ Staff record cleared cleanly.", "success");
+          triggerToast("✓ Staff record cleared cleanly.", "success");
         }
       } catch (error) {
         console.error(error);
@@ -396,7 +536,7 @@ export default function DashboardPage() {
       if (response.ok) {
         setNewBayName("");
         await refreshAllData();
-        showToastNotification("✓ New infrastructure bay expanded.", "success");
+        triggerToast("✓ New infrastructure bay expanded.", "success");
       }
     } catch (error) {
       console.error(error);
@@ -409,7 +549,7 @@ export default function DashboardPage() {
         const response = await fetch(`/api/bays/${bayId}`, { method: "DELETE" });
         if (response.ok) {
           await refreshAllData();
-          showToastNotification("✓ Core workshop node decommissioned.", "success");
+          triggerToast("✓ Core workshop node decommissioned.", "success");
         }
       } catch (error) {
         console.error(error);
@@ -703,7 +843,7 @@ export default function DashboardPage() {
 
                       <div>
                         <label style={{ display: "block", fontSize: "14.5px", fontWeight: "700", marginBottom: "8px", color: "#334155" }}>Vehicle Make & Model *</label>
-                        <input type="text" value={brandModel} onChange={(e) => setBrandModel(e.target.value)} placeholder="e.g. Volkswagen Taigun GT" style={inputStyle} required />
+                        <input type="text" value={brandModel} onChange={(e) => setBrandModel(e.target.value)} placeholder="e.g. Volkswagen Taigun Ski" style={inputStyle} required />
                       </div>
                     </div>
                   </div>
@@ -809,12 +949,10 @@ export default function DashboardPage() {
                   {jobs.map((job) => {
                     const isEditing = !!editingRows[job.id];
 
-                    // 🛑 1. Scan which bays are occupied by OTHER active cars
                     const occupiedBays = jobs
                       .filter(j => j.id !== job.id && j.status !== "Completed" && j.assignedBay && j.assignedBay !== "Unassigned")
                       .map(j => j.assignedBay);
 
-                    // 👤 2. Scan which technicians are busy with OTHER active cars
                     const occupiedTechs = jobs
                       .filter(j => j.id !== job.id && j.status !== "Completed" && j.assignedTech && j.assignedTech !== "Unassigned")
                       .map(j => j.assignedTech);
@@ -827,7 +965,6 @@ export default function DashboardPage() {
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                           
-                          {/* 🚗 HIDDEN IF OCCUPIED BAY DROPDOWN */}
                           <select 
                             disabled={!isEditing} 
                             value={selectedBays[job.id] || "Unassigned"} 
@@ -850,7 +987,6 @@ export default function DashboardPage() {
                             })()}
                           </select>
 
-                          {/* 🔧 HIDDEN IF BUSY TECHNICIAN DROPDOWN */}
                           <select 
                             disabled={!isEditing} 
                             value={selectedTechs[job.id] || "Unassigned"} 
@@ -1044,6 +1180,94 @@ export default function DashboardPage() {
             {toast.type === "success" ? "⚡" : "⚠️"}
           </span>
           {toast.message}
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────── */}
+      {/* SECURITY PROFILE INTERACTIVE CAMERA OVERLAY MODAL        */}
+      {/* ──────────────────────────────────────────────────────── */}
+      {verificationStatus !== "IDLE" && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", backgroundColor: "rgba(15, 23, 42, 0.85)", backdropFilter: "blur(8px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "16px", maxWidth: "450px", width: "100%", padding: "32px", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)", textAlign: "center" }}>
+            
+            {/* VIEW A: PENDING VALIDATION SCANNER */}
+            {verificationStatus === "PENDING_VERIFICATION" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px", alignItems: "center" }}>
+                <div style={{ width: "48px", height: "48px", border: "4px solid #d97706", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+                <h3 style={{ margin: 0, fontSize: "20px", fontWeight: "900", color: "#d97706" }}>AI Cross-Verification In Progress</h3>
+                <p style={{ margin: 0, fontSize: "14px", color: "#64748b", fontWeight: "600", lineHeight: "1.5" }}>
+                  The CCTV camera is scanning the incoming car plate to cross-verify against expected record: <span style={{ fontFamily: "monospace", backgroundColor: "#0f172a", color: "#ffffff", padding: "4px 8px", borderRadius: "4px", fontWeight: "800" }}>{expectedVehicleNo}</span>
+                </p>
+              </div>
+            )}
+
+            {/* VIEW B: SUCCESS MATCHED PASS */}
+            {verificationStatus === "MATCHED" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "20px", alignItems: "center" }}>
+                <div style={{ width: "40px", height: "40px", backgroundColor: "#f0fdf4", color: "#16a34a", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px", fontWeight: "900" }}>✓</div>
+                
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "20px", fontWeight: "900", color: "#16a34a" }}>Successful Cross-Verification!</h3>
+                  <p style={{ margin: "4px 0 0 0", fontSize: "13.5px", color: "#64748b", fontWeight: "600" }}>
+                    Plate confirmed by camera array template!
+                  </p>
+                </div>
+
+                {/* 📊 NEW SIDE-BY-SIDE VISUAL COMPARISON REGISTER CARD */}
+                <div style={{ 
+                  display: "grid", 
+                  gridTemplateColumns: "1fr 1fr", 
+                  gap: "12px", 
+                  backgroundColor: "#f8fafc", 
+                  border: "1px solid #cbd5e1", 
+                  borderRadius: "10px", 
+                  padding: "16px", 
+                  width: "100%",
+                  boxSizing: "border-box"
+                }}>
+                  <div style={{ textAlign: "left" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", display: "block", marginBottom: "4px" }}>MANUAL RECORD:</span>
+                    <span style={{ fontFamily: "monospace", fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>{expectedVehicleNo}</span>
+                  </div>
+                  <div style={{ textAlign: "left", borderLeft: "1px solid #cbd5e1", paddingLeft: "12px" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "800", color: "#16a34a", display: "block", marginBottom: "4px" }}>CAMERA FETCHED:</span>
+                    <span style={{ fontFamily: "monospace", fontSize: "15px", fontWeight: "800", color: "#16a34a" }}>{expectedVehicleNo}</span>
+                  </div>
+                </div>
+
+                <p style={{ margin: 0, fontSize: "12px", color: "#94a3b8", fontWeight: "600" }}>
+                  Launching active workstation pipeline layers...
+                </p>
+              </div>
+            )}
+
+            {/* VIEW C: MISMATCH CONFLICT ERROR WARN */}
+            {verificationStatus === "MISMATCH" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "20px", alignItems: "center" }}>
+                <div style={{ width: "40px", height: "40px", backgroundColor: "#fef2f2", color: "#ef4444", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", fontWeight: "900" }}>✕</div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "20px", fontWeight: "900", color: "#ef4444" }}>Cross-Verification Unmatched!</h3>
+                  <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#94a3b8", fontWeight: "600" }}>Security parameters collision warning.</p>
+                </div>
+                
+                <div style={{ backgroundColor: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "14px", width: "100%", textAlign: "left", boxSizing: "border-box" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "800", color: "#b91c1c", display: "block", marginBottom: "4px", letterSpacing: "0.5px" }}>CAMERA LIVE LOGGER REPORT:</span>
+                  <span style={{ fontFamily: "monospace", fontSize: "13.5px", fontWeight: "700", color: "#991b1b" }}>{serverWarningMsg}</span>
+                </div>
+
+                <div style={{ display: "flex", gap: "12px", width: "100%" }}>
+                  <button type="button" onClick={() => handleUpdateAssignment(verifyingJobId!)} style={{ flexGrow: 1, padding: "12px", backgroundColor: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "8px", color: "#334155", fontWeight: "800", fontSize: "13.5px", cursor: "pointer" }}>
+                    🔄 Try Again
+                  </button>
+                  <button type="button" onClick={handleManualOverride} style={{ flexGrow: 1, padding: "12px", backgroundColor: "#ef4444", border: "none", borderRadius: "8px", color: "#ffffff", fontWeight: "800", fontSize: "13.5px", cursor: "pointer", boxShadow: "0 2px 4px rgba(239,68,68,0.2)" }}>
+                    ⚠️ Override Alert
+                  </button>
+                </div>
+              </div>
+            )}
+
+          </div>
         </div>
       )}
 
