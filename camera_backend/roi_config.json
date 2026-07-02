@@ -1,12 +1,12 @@
 {
     "roi": {
-        "x1": 0,
-        "y1": 398,
-        "x2": 404,
-        "y2": 723
+        "x1": 3,
+        "y1": 495,
+        "x2": 399,
+        "y2": 708
     },
     "frame_width": 404,
     "frame_height": 720,
-    "video_source": "C:\\Users\\ONYX\\Desktop\\Aadit\\N025\\internship\\test\\LiveServiceBay\\camera_backend\\new_sample_sample.mp4",
+    "video_source": "new_sample_sample.mp4",
     "notes": "ROI coordinates for service bay."
 }
